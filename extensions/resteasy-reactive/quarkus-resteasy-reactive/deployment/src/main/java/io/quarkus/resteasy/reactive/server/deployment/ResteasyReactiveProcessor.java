@@ -4,6 +4,7 @@ import static java.util.stream.Collectors.toList;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Deque;
@@ -14,6 +15,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.logging.Logger;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -24,6 +26,7 @@ import javax.ws.rs.core.MediaType;
 import javax.ws.rs.ext.MessageBodyReader;
 import javax.ws.rs.ext.MessageBodyWriter;
 
+import org.apache.commons.lang3.ArrayUtils;
 import org.jboss.jandex.AnnotationInstance;
 import org.jboss.jandex.AnnotationTarget;
 import org.jboss.jandex.AnnotationValue;
@@ -84,6 +87,7 @@ import io.quarkus.deployment.builditem.GeneratedClassBuildItem;
 import io.quarkus.deployment.builditem.ShutdownContextBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.ReflectiveClassBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.ReflectiveHierarchyBuildItem;
+import io.quarkus.deployment.configuration.ConfigurationError;
 import io.quarkus.deployment.recording.RecorderContext;
 import io.quarkus.gizmo.ClassCreator;
 import io.quarkus.gizmo.MethodCreator;
@@ -120,6 +124,7 @@ import io.quarkus.vertx.http.deployment.RouteBuildItem;
 import io.quarkus.vertx.http.runtime.BasicRoute;
 import io.quarkus.vertx.http.runtime.HttpBuildTimeConfig;
 import io.quarkus.vertx.http.runtime.VertxHttpRecorder;
+import io.smallrye.mutiny.tuples.Tuple2;
 import io.vertx.core.Handler;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.ext.web.RoutingContext;
@@ -127,6 +132,8 @@ import io.vertx.ext.web.RoutingContext;
 public class ResteasyReactiveProcessor {
 
     private static final String QUARKUS_INIT_CLASS = "io.quarkus.rest.runtime.__QuarkusInit";
+
+    private static final Logger log = Logger.getLogger("io.quarkus.resteasy.reactive.server");
 
     @BuildStep
     public FeatureBuildItem buildSetup() {
@@ -375,19 +382,46 @@ public class ResteasyReactiveProcessor {
                         .setDefaultProducesHandler(new DefaultProducesHandler.DelegatingDefaultProducesHandler(handlers));
             }
             serverEndpointIndexer = serverEndpointIndexerBuilder.build();
+            Map<String, List<List<EndpointConfig>>> allMethods = new HashMap<>();
 
             for (ClassInfo i : scannedResources.values()) {
                 if (filterClasses && !allowedClasses.contains(i.name().toString())) {
                     continue;
                 }
                 ResourceClass endpoints = serverEndpointIndexer.createEndpoints(i);
+                List<ResourceMethod> resourceMethods = endpoints.getMethods();
+                getResourceMethodByPath(endpoints.getPath(),
+                        resourceMethods.stream().map(item -> Tuple2.of(i, item)).collect(Collectors.toList()))
+                                .forEach((path, endpointConfs) -> {
+                                    for (EndpointConfig endpointConfig : endpointConfs) {
+                                        boolean found = false;
+                                        for (List<EndpointConfig> subList : allMethods.computeIfAbsent(path,
+                                                k -> new ArrayList<>())) {
+                                            if (subList.stream()
+                                                    .anyMatch(endpointConfig1 -> endpointConfig1.equals(endpointConfig))) {
+                                                subList.add(endpointConfig);
+                                                found = true;
+                                            }
+                                        }
+                                        if (!found) {
+                                            List<EndpointConfig> toAdd = new ArrayList<>();
+                                            toAdd.add(endpointConfig);
+                                            allMethods.get(path).add(toAdd);
+                                        }
+                                    }
+                                });
                 if (singletonClasses.contains(i.name().toString())) {
                     endpoints.setFactory(new SingletonBeanFactory<>(i.name().toString()));
                 }
-                if (endpoints != null) {
-                    resourceClasses.add(endpoints);
-                }
+                resourceClasses.add(endpoints);
             }
+
+            StringBuilder message = new StringBuilder();
+            allMethods.entrySet()
+                    .forEach(duplicate -> appendMessage(message, duplicate));
+            if (message.length() > 0)
+                throw new ConfigurationError(message.toString());
+
             //now index possible sub resources. These are all classes that have method annotations
             //that are not annotated @Path
             Deque<ClassInfo> toScan = new ArrayDeque<>();
@@ -520,6 +554,52 @@ public class ResteasyReactiveProcessor {
                         new RouteBuildItem(new BasicRoute(matchPath, VertxHttpRecorder.DEFAULT_ROUTE_ORDER + 1), handler));
             }
         }
+
+    }
+
+    private Map<String, List<EndpointConfig>> getResourceMethodByPath(String path,
+            List<Tuple2<ClassInfo, ResourceMethod>> methods) {
+
+        Map<String, List<Tuple2<ClassInfo, ResourceMethod>>> collect = methods.stream()
+                .collect(Collectors.groupingBy(item -> item.getItem2().getHttpMethod() + " " + (path.equals("/") ? "" : path)
+                        + item.getItem2().getPath()));
+
+        Map<String, List<EndpointConfig>> result = new HashMap<>();
+        collect.keySet().forEach(key -> result.put(key, getEndpointConfigs(collect.get(key))));
+        return result;
+    }
+
+    private void appendMessage(StringBuilder message, Map.Entry<String, List<List<EndpointConfig>>> duplicate) {
+        duplicate.getValue().stream()
+                .filter(values -> values.size() > 1)
+                .forEach(values -> message.append(duplicate.getKey())
+                        .append(" is declared by :\r\n")
+                        .append(values.stream().map(EndpointConfig::toCompleteString).collect(Collectors.joining("\r\n")))
+                        .append(System.lineSeparator()));
+    }
+
+    private List<EndpointConfig> getEndpointConfigs(List<Tuple2<ClassInfo, ResourceMethod>> methods) {
+        List<EndpointConfig> result = new ArrayList<>();
+        for (Tuple2<ClassInfo, ResourceMethod> rm : methods) {
+            String endpoint = rm.getItem1().name().toString() + "#" + rm.getItem2().getName();
+            if (ArrayUtils.isEmpty(rm.getItem2().getConsumes()) && ArrayUtils.isEmpty(rm.getItem2().getProduces()))
+                result.add(new EndpointConfig(null, null, endpoint));
+            else if (!ArrayUtils.isEmpty(rm.getItem2().getConsumes()) && ArrayUtils.isEmpty(rm.getItem2().getProduces())) {
+                result.addAll(Arrays.stream(rm.getItem2().getConsumes())
+                        .map(consumes -> new EndpointConfig(consumes, null, endpoint))
+                        .collect(Collectors.toList()));
+            } else if (ArrayUtils.isEmpty(rm.getItem2().getConsumes()) && !ArrayUtils.isEmpty(rm.getItem2().getProduces())) {
+                result.addAll(Arrays.stream(rm.getItem2().getProduces())
+                        .map(produces -> new EndpointConfig(null, produces, endpoint))
+                        .collect(Collectors.toList()));
+            } else {
+                Stream<String> produces = Arrays.stream(rm.getItem2().getProduces());
+                Stream<String> consumes = Arrays.stream(rm.getItem2().getConsumes());
+                consumes.forEach(
+                        consume -> produces.forEach(produce -> result.add(new EndpointConfig(consume, produce, endpoint))));
+            }
+        }
+        return result;
     }
 
     @BuildStep
@@ -620,6 +700,10 @@ public class ResteasyReactiveProcessor {
         reader.setMediaTypeStrings(Collections.singletonList(mediaType));
         reader.setConstraint(constraint);
         recorder.registerReader(serialisers, entityClass.getName(), reader);
+    }
+
+    private String getKey(String path, ResourceMethod rm) {
+        return path + rm.getPath() + rm.getHttpMethod() + Arrays.toString(rm.getConsumes()) + Arrays.toString(rm.getProduces());
     }
 
 }

@@ -60,7 +60,7 @@ public class MatchedResource {
         return "started";
     }
 
-    @Path("start")
+    @Path("startXML")
     @Consumes("application/xml")
     @POST
     @Produces("text/plain")

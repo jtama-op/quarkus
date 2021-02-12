@@ -1,0 +1,47 @@
+package io.quarkus.resteasy.reactive.server.deployment;
+
+import java.util.Objects;
+import java.util.function.BiPredicate;
+import java.util.logging.Logger;
+
+public class EndpointConfig {
+    private static Logger log = Logger.getLogger("io.quarkus.resteasy.reactive");
+    private String consumes;
+    private String produces;
+    private String endpoint;
+
+    private static final BiPredicate<String, String> isEquivalentMimeType = (item1, item2) -> item1.equals("*")
+            || item2.equals("*") || item1.equals(item2);
+
+    public EndpointConfig(String consumes, String produces, String endpoint) {
+        this.consumes = consumes != null ? consumes : "*";
+        this.produces = produces != null ? produces : "*";
+        this.endpoint = endpoint;
+    }
+
+    @Override
+    public String toString() {
+        return String.format("consumes %s, produces %s", consumes, produces);
+    }
+
+    public String toCompleteString() {
+        return String.format("%s consumes %s, produces %s", endpoint, consumes, produces);
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        EndpointConfig that = (EndpointConfig) o;
+        return isEquivalentMimeType.test(consumes, that.consumes) && isEquivalentMimeType.test(produces, that.produces);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(consumes, produces);
+    }
+}

@@ -70,7 +70,7 @@ public class MatchedResourceTest {
         String rtn = response.readEntity(String.class);
         Assertions.assertEquals("started", rtn);
         response.close();
-        base = client.target(generateURL("/start"));
+        base = client.target(generateURL("/startXML"));
         response = base.request().post(Entity.entity("<xml/>", "application/xml"));
         Assertions.assertEquals(response.getStatus(), Response.Status.OK.getStatusCode());
         rtn = response.readEntity(String.class);
