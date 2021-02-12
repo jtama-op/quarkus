@@ -658,6 +658,8 @@ public class ResteasyReactiveProcessor {
                 for (String produce : rm.getProduces()) {
                     result.add(new EndpointConfig(path, rm.getHttpMethod(), consume, produce, exposingMethod));
                 }
+            }
+        }
         return result;
     }
 
