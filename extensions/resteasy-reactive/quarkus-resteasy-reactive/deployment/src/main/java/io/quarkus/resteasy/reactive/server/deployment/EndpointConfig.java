@@ -5,7 +5,7 @@ import java.util.function.BiPredicate;
 import java.util.logging.Logger;
 
 public class EndpointConfig {
-    private static Logger log = Logger.getLogger("io.quarkus.resteasy.reactive");
+
     private String consumes;
     private String produces;
     private String endpoint;
@@ -37,7 +37,7 @@ public class EndpointConfig {
             return false;
         }
         EndpointConfig that = (EndpointConfig) o;
-        return isEquivalentMimeType.test(consumes, that.consumes) && isEquivalentMimeType.test(produces, that.produces);
+        return consumes.equals(that.consumes) && produces.equals(that.produces);
     }
 
     @Override

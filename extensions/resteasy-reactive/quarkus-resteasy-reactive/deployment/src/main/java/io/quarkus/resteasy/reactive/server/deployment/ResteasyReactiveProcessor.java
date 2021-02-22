@@ -593,10 +593,9 @@ public class ResteasyReactiveProcessor {
                         .map(produces -> new EndpointConfig(null, produces, endpoint))
                         .collect(Collectors.toList()));
             } else {
-                Stream<String> produces = Arrays.stream(rm.getItem2().getProduces());
                 Stream<String> consumes = Arrays.stream(rm.getItem2().getConsumes());
                 consumes.forEach(
-                        consume -> produces.forEach(produce -> result.add(new EndpointConfig(consume, produce, endpoint))));
+                        consume -> Arrays.stream(rm.getItem2().getProduces()).forEach(produce -> result.add(new EndpointConfig(consume, produce, endpoint))));
             }
         }
         return result;
