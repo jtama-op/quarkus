@@ -1,11 +1,15 @@
 package io.quarkus.arc.deployment;
 
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
+import java.util.stream.Collectors;
 
 import org.eclipse.microprofile.config.Config;
 import org.eclipse.microprofile.config.spi.ConfigProviderResolver;
@@ -15,6 +19,7 @@ import org.jboss.jandex.AnnotationTarget.Kind;
 import org.jboss.jandex.AnnotationValue;
 import org.jboss.jandex.DotName;
 import org.jboss.jandex.FieldInfo;
+import org.jboss.jandex.IndexView;
 import org.jboss.jandex.MethodInfo;
 import org.jboss.logging.Logger;
 
@@ -42,7 +47,8 @@ public class BuildTimeEnabledProcessor {
     private static final DotName UNLESS_BUILD_PROPERTY = DotName.createSimple(UnlessBuildProperty.class.getName());
 
     @BuildStep
-    void ifBuildProfile(CombinedIndexBuildItem index, BuildProducer<BuildTimeConditionBuildItem> producer) {
+    void ifBuildProfile(CombinedIndexBuildItem index, BuildProducer<BuildTimeConditionBuildItem> producer,
+            BuildProducer<PreAdditionalBeanBuildTimeConditionBuildItem> producerPreAdditionalBean) {
         Collection<AnnotationInstance> annotationInstances = index.getIndex().getAnnotations(IF_BUILD_PROFILE);
         for (AnnotationInstance instance : annotationInstances) {
             String profileOnInstance = instance.value().asString();
@@ -53,11 +59,13 @@ public class BuildTimeEnabledProcessor {
                 LOGGER.debug("Disabling " + instance.target() + " since the profile value does not match the active profile.");
             }
             producer.produce(new BuildTimeConditionBuildItem(instance.target(), enabled));
+            producerPreAdditionalBean.produce(new PreAdditionalBeanBuildTimeConditionBuildItem(instance.target(), enabled));
         }
     }
 
     @BuildStep
-    void unlessBuildProfile(CombinedIndexBuildItem index, BuildProducer<BuildTimeConditionBuildItem> producer) {
+    void unlessBuildProfile(CombinedIndexBuildItem index, BuildProducer<BuildTimeConditionBuildItem> producer,
+            BuildProducer<PreAdditionalBeanBuildTimeConditionBuildItem> producerPreAdditionalBean) {
         Collection<AnnotationInstance> annotationInstances = index.getIndex().getAnnotations(UNLESS_BUILD_PROFILE);
         for (AnnotationInstance instance : annotationInstances) {
             String profileOnInstance = instance.value().asString();
@@ -68,6 +76,7 @@ public class BuildTimeEnabledProcessor {
                 LOGGER.debug("Disabling " + instance.target() + " since the profile value matches the active profile.");
             }
             producer.produce(new BuildTimeConditionBuildItem(instance.target(), enabled));
+            producerPreAdditionalBean.produce(new PreAdditionalBeanBuildTimeConditionBuildItem(instance.target(), enabled));
         }
     }
 
@@ -78,7 +87,12 @@ public class BuildTimeEnabledProcessor {
             public Boolean apply(String stringValue, String expectedStringValue) {
                 return stringValue.equals(expectedStringValue);
             }
-        }, index, producer);
+        }, index.getIndex(), new BiConsumer<AnnotationTarget, Boolean>() {
+            @Override
+            public void accept(AnnotationTarget target, Boolean enabled) {
+                producer.produce(new BuildTimeConditionBuildItem(target, enabled));
+            }
+        });
     }
 
     @BuildStep
@@ -88,13 +102,50 @@ public class BuildTimeEnabledProcessor {
             public Boolean apply(String stringValue, String expectedStringValue) {
                 return !stringValue.equals(expectedStringValue);
             }
-        }, index, producer);
+        }, index.getIndex(), new BiConsumer<AnnotationTarget, Boolean>() {
+            @Override
+            public void accept(AnnotationTarget target, Boolean enabled) {
+                producer.produce(new BuildTimeConditionBuildItem(target, enabled));
+            }
+        });
     }
 
-    void buildProperty(DotName annotationName, BiFunction<String, String, Boolean> testFun, BeanArchiveIndexBuildItem index,
-            BuildProducer<BuildTimeConditionBuildItem> producer) {
+    @BuildStep
+    void ifBuildPropertyPreAdditionalBean(CombinedIndexBuildItem index,
+            BuildProducer<PreAdditionalBeanBuildTimeConditionBuildItem> producer) {
+        buildProperty(IF_BUILD_PROPERTY, new BiFunction<String, String, Boolean>() {
+            @Override
+            public Boolean apply(String stringValue, String expectedStringValue) {
+                return stringValue.equals(expectedStringValue);
+            }
+        }, index.getIndex(), new BiConsumer<AnnotationTarget, Boolean>() {
+            @Override
+            public void accept(AnnotationTarget target, Boolean enabled) {
+                producer.produce(new PreAdditionalBeanBuildTimeConditionBuildItem(target, enabled));
+            }
+        });
+    }
+
+    @BuildStep
+    void unlessBuildPropertyPreAdditionalBean(CombinedIndexBuildItem index,
+            BuildProducer<PreAdditionalBeanBuildTimeConditionBuildItem> producer) {
+        buildProperty(UNLESS_BUILD_PROPERTY, new BiFunction<String, String, Boolean>() {
+            @Override
+            public Boolean apply(String stringValue, String expectedStringValue) {
+                return !stringValue.equals(expectedStringValue);
+            }
+        }, index.getIndex(), new BiConsumer<AnnotationTarget, Boolean>() {
+            @Override
+            public void accept(AnnotationTarget target, Boolean enabled) {
+                producer.produce(new PreAdditionalBeanBuildTimeConditionBuildItem(target, enabled));
+            }
+        });
+    }
+
+    void buildProperty(DotName annotationName, BiFunction<String, String, Boolean> testFun, IndexView index,
+            BiConsumer<AnnotationTarget, Boolean> producer) {
         Config config = ConfigProviderResolver.instance().getConfig();
-        Collection<AnnotationInstance> annotationInstances = index.getIndex().getAnnotations(annotationName);
+        Collection<AnnotationInstance> annotationInstances = index.getAnnotations(annotationName);
         for (AnnotationInstance instance : annotationInstances) {
             String propertyName = instance.value("name").asString();
             String expectedStringValue = instance.value("stringValue").asString();
@@ -123,8 +174,7 @@ public class BuildTimeEnabledProcessor {
                     enabled = false;
                 }
             }
-
-            producer.produce(new BuildTimeConditionBuildItem(instance.target(), enabled));
+            producer.accept(instance.target(), enabled);
         }
     }
 
@@ -188,6 +238,26 @@ public class BuildTimeEnabledProcessor {
         }));
     }
 
+    /**
+     * @param buildTimeConditions the build time conditions from which the excluded classes are extracted.
+     * @return an instance of {@link BuildExclusionsBuildItem} containing the set of classes
+     *         that have been annotated with unsuccessful build time conditions.
+     */
+    @BuildStep
+    BuildExclusionsBuildItem buildExclusions(List<PreAdditionalBeanBuildTimeConditionBuildItem> buildTimeConditions) {
+        final Map<Kind, Set<String>> map = buildTimeConditions.stream()
+                .filter(item -> !item.isEnabled())
+                .map(PreAdditionalBeanBuildTimeConditionBuildItem::getTarget)
+                .collect(
+                        Collectors.groupingBy(
+                                AnnotationTarget::kind,
+                                Collectors.mapping(BuildExclusionsBuildItem::targetMapper, Collectors.toSet())));
+        return new BuildExclusionsBuildItem(
+                map.getOrDefault(AnnotationTarget.Kind.CLASS, Collections.emptySet()),
+                map.getOrDefault(AnnotationTarget.Kind.METHOD, Collections.emptySet()),
+                map.getOrDefault(AnnotationTarget.Kind.FIELD, Collections.emptySet()));
+    }
+
     private String toUniqueString(FieldInfo field) {
         return field.declaringClass().name().toString() + "." + field.name();
     }
@@ -199,11 +269,10 @@ public class BuildTimeEnabledProcessor {
                 // Veto the class
                 transform.add(DotNames.VETOED);
             } else {
-                // Add @Alternative to the producer
-                transform.add(DotNames.ALTERNATIVE);
+                // Veto the producer
+                transform.add(DotNames.VETOED_PRODUCER);
             }
             transform.done();
         }
     }
-
 }

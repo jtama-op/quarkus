@@ -9,10 +9,24 @@ public class ResourceRequestFilterHandler implements ServerRestHandler {
 
     private final ContainerRequestFilter filter;
     private final boolean preMatch;
+    private final boolean nonBlockingRequired;
 
-    public ResourceRequestFilterHandler(ContainerRequestFilter filter, boolean preMatch) {
+    public ResourceRequestFilterHandler(ContainerRequestFilter filter, boolean preMatch, boolean nonBlockingRequired) {
         this.filter = filter;
         this.preMatch = preMatch;
+        this.nonBlockingRequired = nonBlockingRequired;
+    }
+
+    public ContainerRequestFilter getFilter() {
+        return filter;
+    }
+
+    public boolean isPreMatch() {
+        return preMatch;
+    }
+
+    public boolean isNonBlockingRequired() {
+        return nonBlockingRequired;
     }
 
     @Override

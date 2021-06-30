@@ -9,12 +9,16 @@ import javax.inject.Singleton;
 import grpc.health.v1.HealthOuterClass;
 import grpc.health.v1.HealthOuterClass.HealthCheckResponse.ServingStatus;
 import grpc.health.v1.MutinyHealthGrpc;
+import io.quarkus.grpc.GrpcService;
 import io.smallrye.mutiny.Multi;
 import io.smallrye.mutiny.Uni;
 import io.smallrye.mutiny.operators.multi.processors.BroadcastProcessor;
 
+// Note that we need to add the scope explicitly because this class is not part of the index
 @Singleton
+@GrpcService
 public class GrpcHealthEndpoint extends MutinyHealthGrpc.HealthImplBase {
+
     @Inject
     GrpcHealthStorage healthStorage;
 
@@ -40,6 +44,6 @@ public class GrpcHealthEndpoint extends MutinyHealthGrpc.HealthImplBase {
                     public HealthOuterClass.HealthCheckResponse apply(ServingStatus servingStatus) {
                         return healthStorage.resultForStatus(servingStatus);
                     }
-                })).transform().byDroppingRepetitions();
+                })).skip().repetitions();
     }
 }

@@ -8,14 +8,19 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
+import javax.ws.rs.Priorities;
 import javax.ws.rs.RuntimeType;
+import javax.ws.rs.ext.RuntimeDelegate;
 
 import org.jboss.jandex.AnnotationInstance;
+import org.jboss.jandex.AnnotationTarget;
 import org.jboss.jandex.ClassInfo;
 import org.jboss.jandex.DotName;
 import org.jboss.jandex.IndexView;
 import org.jboss.jandex.Type;
+import org.jboss.resteasy.reactive.common.jaxrs.RuntimeDelegateImpl;
 import org.jboss.resteasy.reactive.common.model.InterceptorContainer;
 import org.jboss.resteasy.reactive.common.model.PreMatchInterceptorContainer;
 import org.jboss.resteasy.reactive.common.model.ResourceInterceptor;
@@ -31,33 +36,40 @@ import io.quarkus.arc.deployment.AdditionalBeanBuildItem;
 import io.quarkus.arc.deployment.AnnotationsTransformerBuildItem;
 import io.quarkus.arc.deployment.BeanArchiveIndexBuildItem;
 import io.quarkus.arc.deployment.BeanContainerBuildItem;
+import io.quarkus.arc.deployment.PreAdditionalBeanBuildTimeConditionBuildItem;
 import io.quarkus.deployment.annotations.BuildProducer;
 import io.quarkus.deployment.annotations.BuildStep;
 import io.quarkus.deployment.builditem.CombinedIndexBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.ReflectiveClassBuildItem;
+import io.quarkus.deployment.builditem.nativeimage.ServiceProviderBuildItem;
 import io.quarkus.deployment.util.JandexUtil;
-import io.quarkus.resteasy.reactive.common.runtime.JaxRsSecurityConfig;
+import io.quarkus.resteasy.reactive.common.runtime.ResteasyReactiveConfig;
 import io.quarkus.resteasy.reactive.spi.AbstractInterceptorBuildItem;
 import io.quarkus.resteasy.reactive.spi.ContainerRequestFilterBuildItem;
 import io.quarkus.resteasy.reactive.spi.ContainerResponseFilterBuildItem;
 import io.quarkus.resteasy.reactive.spi.MessageBodyReaderBuildItem;
+import io.quarkus.resteasy.reactive.spi.MessageBodyReaderOverrideBuildItem;
 import io.quarkus.resteasy.reactive.spi.MessageBodyWriterBuildItem;
+import io.quarkus.resteasy.reactive.spi.MessageBodyWriterOverrideBuildItem;
 import io.quarkus.resteasy.reactive.spi.ReaderInterceptorBuildItem;
 import io.quarkus.resteasy.reactive.spi.WriterInterceptorBuildItem;
-import io.quarkus.security.spi.AdditionalSecuredClassesBuildIem;
+import io.quarkus.security.spi.AdditionalSecuredClassesBuildItem;
 import io.quarkus.security.spi.SecurityTransformerUtils;
 
 public class ResteasyReactiveCommonProcessor {
 
+    private static final int LEGACY_READER_PRIORITY = Priorities.USER * 2; // readers are compared by decreased priority
+    private static final int LEGACY_WRITER_PRIORITY = Priorities.USER / 2; // writers are compared by increased priority
+
     @BuildStep
     void setUpDenyAllJaxRs(CombinedIndexBuildItem index,
-            JaxRsSecurityConfig config,
-            ResourceScanningResultBuildItem resteasyDeployment,
-            BuildProducer<AdditionalSecuredClassesBuildIem> additionalSecuredClasses) {
-        if (config.denyJaxRs) {
+            ResteasyReactiveConfig config,
+            Optional<ResourceScanningResultBuildItem> resteasyDeployment,
+            BuildProducer<AdditionalSecuredClassesBuildItem> additionalSecuredClasses) {
+        if (config.denyJaxRs && resteasyDeployment.isPresent()) {
             final List<ClassInfo> classes = new ArrayList<>();
 
-            Set<DotName> resourceClasses = resteasyDeployment.getResult().getScannedResourcePaths().keySet();
+            Set<DotName> resourceClasses = resteasyDeployment.get().getResult().getScannedResourcePaths().keySet();
             for (DotName className : resourceClasses) {
                 ClassInfo classInfo = index.getIndex().getClassByName(className);
                 if (!SecurityTransformerUtils.hasSecurityAnnotation(classInfo)) {
@@ -65,15 +77,21 @@ public class ResteasyReactiveCommonProcessor {
                 }
             }
 
-            additionalSecuredClasses.produce(new AdditionalSecuredClassesBuildIem(classes));
+            additionalSecuredClasses.produce(new AdditionalSecuredClassesBuildItem(classes));
         }
     }
 
     @BuildStep
     ApplicationResultBuildItem handleApplication(CombinedIndexBuildItem combinedIndexBuildItem,
-            BuildProducer<ReflectiveClassBuildItem> reflectiveClass) {
+            BuildProducer<ReflectiveClassBuildItem> reflectiveClass,
+            List<PreAdditionalBeanBuildTimeConditionBuildItem> buildTimeConditions,
+            ResteasyReactiveConfig config) {
+        // Use the "pre additional bean" build time conditions since we need to be able to filter the beans
+        // before actually adding them otherwise if we use normal build time conditions, we end up
+        // with a circular dependency
         ApplicationScanningResult result = ResteasyReactiveScanner
-                .scanForApplicationClass(combinedIndexBuildItem.getComputingIndex());
+                .scanForApplicationClass(combinedIndexBuildItem.getComputingIndex(),
+                        config.buildTimeConditionAware ? getExcludedClasses(buildTimeConditions) : Collections.emptySet());
         if (result.getSelectedAppClass() != null) {
             reflectiveClass.produce(new ReflectiveClassBuildItem(false, false, result.getSelectedAppClass().name().toString()));
         }
@@ -137,6 +155,9 @@ public class ResteasyReactiveCommonProcessor {
         Integer priority = filterItem.getPriority();
         if (priority != null) {
             interceptor.setPriority(priority);
+        }
+        if (filterItem instanceof ContainerRequestFilterBuildItem) {
+            interceptor.setNonBlockingRequired(((ContainerRequestFilterBuildItem) filterItem).isNonBlockingRequired());
         }
         if (interceptors instanceof PreMatchInterceptorContainer
                 && ((ContainerRequestFilterBuildItem) filterItem).isPreMatching()) {
@@ -236,8 +257,13 @@ public class ResteasyReactiveCommonProcessor {
                 if (constrainedToInstance != null) {
                     runtimeType = RuntimeType.valueOf(constrainedToInstance.value().asEnum());
                 }
+                int priority = Priorities.USER;
+                AnnotationInstance priorityInstance = writerClass.classAnnotation(ResteasyReactiveDotNames.PRIORITY);
+                if (priorityInstance != null) {
+                    priority = priorityInstance.value().asInt();
+                }
                 messageBodyWriterBuildItemBuildProducer.produce(new MessageBodyWriterBuildItem(writerClassName,
-                        typeParameters.get(0).name().toString(), mediaTypeStrings, runtimeType, false));
+                        typeParameters.get(0).name().toString(), mediaTypeStrings, runtimeType, false, priority));
             }
         }
 
@@ -261,11 +287,59 @@ public class ResteasyReactiveCommonProcessor {
                 if (constrainedToInstance != null) {
                     runtimeType = RuntimeType.valueOf(constrainedToInstance.value().asEnum());
                 }
+                int priority = Priorities.USER;
+                AnnotationInstance priorityInstance = readerClass.classAnnotation(ResteasyReactiveDotNames.PRIORITY);
+                if (priorityInstance != null) {
+                    priority = priorityInstance.value().asInt();
+                }
                 messageBodyReaderBuildItemBuildProducer.produce(new MessageBodyReaderBuildItem(readerClassName,
-                        typeParameters.get(0).name().toString(), mediaTypeStrings, runtimeType, false));
+                        typeParameters.get(0).name().toString(), mediaTypeStrings, runtimeType, false, priority));
                 reflectiveClass.produce(new ReflectiveClassBuildItem(true, false, false, readerClassName));
             }
         }
     }
 
+    @BuildStep
+    void registerRuntimeDelegateImpl(BuildProducer<ServiceProviderBuildItem> serviceProviders) {
+        serviceProviders.produce(new ServiceProviderBuildItem(RuntimeDelegate.class.getName(),
+                RuntimeDelegateImpl.class.getName()));
+    }
+
+    /*
+     * There are some MessageBodyReaders and MessageBodyWriters that are brought in transitively
+     * by the inclusion of the extension like the 'quarkus-keycloak-admin-client'.
+     * We need to make sure that these providers are not selected over the ones that our Quarkus extensions provide.
+     * To do that, we first need to make them built-in (as the spec mandates that non-build-in providers are choosen
+     * over built-in ones) and then we also need to change their priority
+     */
+    @BuildStep
+    void deprioritizeLegacyProviders(BuildProducer<MessageBodyReaderOverrideBuildItem> readers,
+            BuildProducer<MessageBodyWriterOverrideBuildItem> writers) {
+        readers.produce(new MessageBodyReaderOverrideBuildItem(
+                "org.jboss.resteasy.plugins.providers.jackson.ResteasyJackson2Provider", LEGACY_READER_PRIORITY, true));
+        readers.produce(new MessageBodyReaderOverrideBuildItem("com.fasterxml.jackson.jaxrs.json.JacksonJsonProvider",
+                LEGACY_READER_PRIORITY, true));
+        readers.produce(new MessageBodyReaderOverrideBuildItem("com.fasterxml.jackson.jaxrs.json.JacksonJaxbJsonProvider",
+                LEGACY_READER_PRIORITY, true));
+
+        writers.produce(new MessageBodyWriterOverrideBuildItem(
+                "org.jboss.resteasy.plugins.providers.jackson.ResteasyJackson2Provider", LEGACY_WRITER_PRIORITY, true));
+        writers.produce(new MessageBodyWriterOverrideBuildItem("com.fasterxml.jackson.jaxrs.json.JacksonJsonProvider",
+                LEGACY_WRITER_PRIORITY, true));
+        writers.produce(new MessageBodyWriterOverrideBuildItem("com.fasterxml.jackson.jaxrs.json.JacksonJaxbJsonProvider",
+                LEGACY_WRITER_PRIORITY, true));
+    }
+
+    /**
+     * @param buildTimeConditions the build time conditions from which the excluded classes are extracted.
+     * @return the set of classes that have been annotated with unsuccessful build time conditions.
+     */
+    private static Set<String> getExcludedClasses(List<PreAdditionalBeanBuildTimeConditionBuildItem> buildTimeConditions) {
+        return buildTimeConditions.stream()
+                .filter(item -> !item.isEnabled())
+                .map(PreAdditionalBeanBuildTimeConditionBuildItem::getTarget)
+                .filter(target -> target.kind() == AnnotationTarget.Kind.CLASS)
+                .map(target -> target.asClass().toString())
+                .collect(Collectors.toSet());
+    }
 }

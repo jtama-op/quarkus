@@ -4,6 +4,8 @@ import java.time.Instant;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
+import java.util.OptionalLong;
 import java.util.Properties;
 
 import javax.annotation.PreDestroy;
@@ -12,6 +14,7 @@ import javax.enterprise.context.ApplicationScoped;
 import javax.enterprise.context.BeforeDestroyed;
 import javax.enterprise.event.Event;
 import javax.enterprise.event.Observes;
+import javax.enterprise.inject.Any;
 import javax.enterprise.inject.Instance;
 import javax.enterprise.inject.Produces;
 import javax.inject.Singleton;
@@ -19,7 +22,6 @@ import javax.interceptor.Interceptor;
 import javax.transaction.SystemException;
 import javax.transaction.UserTransaction;
 
-import org.eclipse.microprofile.config.Config;
 import org.jboss.logging.Logger;
 import org.quartz.CronScheduleBuilder;
 import org.quartz.Job;
@@ -27,6 +29,7 @@ import org.quartz.JobBuilder;
 import org.quartz.JobDetail;
 import org.quartz.JobExecutionContext;
 import org.quartz.JobExecutionException;
+import org.quartz.JobKey;
 import org.quartz.ScheduleBuilder;
 import org.quartz.SchedulerException;
 import org.quartz.SchedulerFactory;
@@ -44,6 +47,7 @@ import com.cronutils.model.definition.CronDefinition;
 import com.cronutils.model.definition.CronDefinitionBuilder;
 import com.cronutils.parser.CronParser;
 
+import io.quarkus.arc.Arc;
 import io.quarkus.runtime.StartupEvent;
 import io.quarkus.scheduler.Scheduled;
 import io.quarkus.scheduler.Scheduled.ConcurrentExecution;
@@ -55,8 +59,9 @@ import io.quarkus.scheduler.runtime.ScheduledInvoker;
 import io.quarkus.scheduler.runtime.ScheduledMethodMetadata;
 import io.quarkus.scheduler.runtime.SchedulerContext;
 import io.quarkus.scheduler.runtime.SchedulerRuntimeConfig;
-import io.quarkus.scheduler.runtime.SimpleScheduler;
 import io.quarkus.scheduler.runtime.SkipConcurrentExecutionInvoker;
+import io.quarkus.scheduler.runtime.SkipPredicateInvoker;
+import io.quarkus.scheduler.runtime.util.SchedulerUtils;
 
 @Singleton
 public class QuartzScheduler implements Scheduler {
@@ -68,12 +73,10 @@ public class QuartzScheduler implements Scheduler {
     private final boolean enabled;
     private final boolean startHalted;
 
-    public QuartzScheduler(SchedulerContext context, QuartzSupport quartzSupport, Config config,
-            SchedulerRuntimeConfig schedulerRuntimeConfig, Event<SkippedExecution> skippedExecutionEvent, Instance<Job> jobs,
-            Instance<UserTransaction> userTransation) {
+    public QuartzScheduler(SchedulerContext context, QuartzSupport quartzSupport, SchedulerRuntimeConfig schedulerRuntimeConfig,
+            Event<SkippedExecution> skippedExecutionEvent, Instance<Job> jobs, Instance<UserTransaction> userTransaction) {
         enabled = schedulerRuntimeConfig.enabled;
         final QuartzRuntimeConfig runtimeConfig = quartzSupport.getRuntimeConfig();
-        warnDeprecated(runtimeConfig);
 
         boolean forceStart;
         if (runtimeConfig.startMode != QuartzStartMode.NORMAL) {
@@ -81,7 +84,7 @@ public class QuartzScheduler implements Scheduler {
             forceStart = startHalted || (runtimeConfig.startMode == QuartzStartMode.FORCED);
         } else {
             startHalted = false;
-            forceStart = runtimeConfig.forceStart.orElse(false);
+            forceStart = false;
         }
 
         if (!enabled) {
@@ -97,8 +100,8 @@ public class QuartzScheduler implements Scheduler {
 
             try {
                 boolean manageTx = quartzSupport.getBuildTimeConfig().storeType.isNonManagedTxJobStore();
-                if (manageTx && userTransation.isResolvable()) {
-                    transaction = userTransation.get();
+                if (manageTx && userTransaction.isResolvable()) {
+                    transaction = userTransaction.get();
                 }
                 Properties props = getSchedulerConfigurationProperties(quartzSupport);
 
@@ -118,13 +121,18 @@ public class QuartzScheduler implements Scheduler {
                     int nameSequence = 0;
 
                     for (Scheduled scheduled : method.getSchedules()) {
-                        String identity = scheduled.identity().trim();
+                        String identity = SchedulerUtils.lookUpPropertyValue(scheduled.identity());
                         if (identity.isEmpty()) {
                             identity = ++nameSequence + "_" + method.getInvokerClassName();
                         }
                         ScheduledInvoker invoker = context.createInvoker(method.getInvokerClassName());
                         if (scheduled.concurrentExecution() == ConcurrentExecution.SKIP) {
                             invoker = new SkipConcurrentExecutionInvoker(invoker, skippedExecutionEvent);
+                        }
+                        if (!scheduled.skipExecutionIf().equals(Scheduled.Never.class)) {
+                            invoker = new SkipPredicateInvoker(invoker,
+                                    Arc.container().select(scheduled.skipExecutionIf(), Any.Literal.INSTANCE).get(),
+                                    skippedExecutionEvent);
                         }
                         invokers.put(identity, invoker);
 
@@ -136,10 +144,10 @@ public class QuartzScheduler implements Scheduler {
                                 .requestRecovery();
                         ScheduleBuilder<?> scheduleBuilder;
 
-                        String cron = scheduled.cron().trim();
+                        String cron = SchedulerUtils.lookUpPropertyValue(scheduled.cron());
                         if (!cron.isEmpty()) {
-                            if (SchedulerContext.isConfigValue(cron)) {
-                                cron = config.getValue(SchedulerContext.getConfigProperty(cron), String.class);
+                            if (SchedulerUtils.isOff(cron)) {
+                                continue;
                             }
                             if (!CronType.QUARTZ.equals(cronType)) {
                                 // Migrate the expression
@@ -157,24 +165,26 @@ public class QuartzScheduler implements Scheduler {
                             }
                             scheduleBuilder = CronScheduleBuilder.cronSchedule(cron);
                         } else if (!scheduled.every().isEmpty()) {
+                            OptionalLong everyMillis = SchedulerUtils.parseEveryAsMillis(scheduled);
+                            if (!everyMillis.isPresent()) {
+                                continue;
+                            }
                             scheduleBuilder = SimpleScheduleBuilder.simpleSchedule()
-                                    .withIntervalInMilliseconds(
-                                            SimpleScheduler.parseDuration(scheduled, scheduled.every(), "every").toMillis())
+                                    .withIntervalInMilliseconds(everyMillis.getAsLong())
                                     .repeatForever();
                         } else {
                             throw new IllegalArgumentException("Invalid schedule configuration: " + scheduled);
                         }
 
                         TriggerBuilder<?> triggerBuilder = TriggerBuilder.newTrigger()
-                                .withIdentity(identity + "_trigger", Scheduler.class.getName())
+                                .withIdentity(identity, Scheduler.class.getName())
                                 .withSchedule(scheduleBuilder);
 
                         Long millisToAdd = null;
                         if (scheduled.delay() > 0) {
                             millisToAdd = scheduled.delayUnit().toMillis(scheduled.delay());
                         } else if (!scheduled.delayed().isEmpty()) {
-                            millisToAdd = Math
-                                    .abs(SimpleScheduler.parseDuration(scheduled, scheduled.delayed(), "delayed").toMillis());
+                            millisToAdd = SchedulerUtils.parseDelayedAsMillis(scheduled);
                         }
                         if (millisToAdd != null) {
                             triggerBuilder.startAt(new Date(Instant.now()
@@ -205,24 +215,12 @@ public class QuartzScheduler implements Scheduler {
         }
     }
 
-    /**
-     * Warn if there's any deprecated configuration
-     *
-     * @param runtimeConfig {@link QuartzRuntimeConfig} quartz scheduler configurations
-     */
-    private static void warnDeprecated(QuartzRuntimeConfig runtimeConfig) {
-        if (runtimeConfig.forceStart.isPresent()) {
-            LOGGER.warn("`quarkus.quartz.force-start` is deprecated and will be removed in a future version - it is "
-                    + "recommended to switch to `quarkus.quartz.start-mode`");
-        }
-    }
-
     @Produces
     @Singleton
     org.quartz.Scheduler produceQuartzScheduler() {
         if (scheduler == null) {
             throw new IllegalStateException(
-                    "Quartz scheduler is either explicitly disabled through quarkus.scheduler.enabled=false or no @Scheduled methods were found. If you only need to schedule a job programmatically you can force the start of the scheduler via quarkus.quartz.force-start=true");
+                    "Quartz scheduler is either explicitly disabled through quarkus.scheduler.enabled=false or no @Scheduled methods were found. If you only need to schedule a job programmatically you can force the start of the scheduler by setting 'quarkus.quartz.start-mode=forced'.");
         }
         return scheduler;
     }
@@ -237,8 +235,22 @@ public class QuartzScheduler implements Scheduler {
                     scheduler.standby();
                 }
             } catch (SchedulerException e) {
-                LOGGER.warn("Unable to pause scheduler", e);
+                throw new RuntimeException("Unable to pause scheduler", e);
             }
+        }
+    }
+
+    @Override
+    public void pause(String identity) {
+        Objects.requireNonNull(identity, "Cannot pause - identity is null");
+        if (identity.isEmpty()) {
+            LOGGER.warn("Cannot pause - identity is empty");
+            return;
+        }
+        try {
+            scheduler.pauseJob(new JobKey(SchedulerUtils.lookUpPropertyValue(identity), Scheduler.class.getName()));
+        } catch (SchedulerException e) {
+            throw new RuntimeException("Unable to pause job", e);
         }
     }
 
@@ -252,8 +264,22 @@ public class QuartzScheduler implements Scheduler {
                     scheduler.start();
                 }
             } catch (SchedulerException e) {
-                LOGGER.warn("Unable to resume scheduler", e);
+                throw new RuntimeException("Unable to resume scheduler", e);
             }
+        }
+    }
+
+    @Override
+    public void resume(String identity) {
+        Objects.requireNonNull(identity, "Cannot resume - identity is null");
+        if (identity.isEmpty()) {
+            LOGGER.warn("Cannot resume - identity is empty");
+            return;
+        }
+        try {
+            scheduler.resumeJob(new JobKey(SchedulerUtils.lookUpPropertyValue(identity), Scheduler.class.getName()));
+        } catch (SchedulerException e) {
+            throw new RuntimeException("Unable to resume job", e);
         }
     }
 
@@ -288,10 +314,11 @@ public class QuartzScheduler implements Scheduler {
      *
      * @param event ignored
      */
-    void destroy(@BeforeDestroyed(ApplicationScoped.class) Object event) { //
+    void destroy(@Observes @BeforeDestroyed(ApplicationScoped.class) Object event) {
         if (scheduler != null) {
             try {
-                scheduler.shutdown(true); // gracefully shutdown
+                // Note that this method does not return until all currently executing jobs have completed
+                scheduler.shutdown(true);
             } catch (SchedulerException e) {
                 LOGGER.warnf("Unable to gracefully shutdown the scheduler", e);
             }
@@ -397,7 +424,7 @@ public class QuartzScheduler implements Scheduler {
 
         final JobExecutionContext context;
 
-        public QuartzTrigger(JobExecutionContext context) {
+        QuartzTrigger(JobExecutionContext context) {
             this.context = context;
         }
 
@@ -415,7 +442,7 @@ public class QuartzScheduler implements Scheduler {
 
         @Override
         public String getId() {
-            return context.getTrigger().getKey().toString();
+            return context.getTrigger().getKey().getName();
         }
 
     }
@@ -424,7 +451,7 @@ public class QuartzScheduler implements Scheduler {
 
         final QuartzTrigger trigger;
 
-        public QuartzScheduledExecution(QuartzTrigger trigger) {
+        QuartzScheduledExecution(QuartzTrigger trigger) {
             this.trigger = trigger;
         }
 

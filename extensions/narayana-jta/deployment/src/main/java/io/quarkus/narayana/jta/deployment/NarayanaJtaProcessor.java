@@ -21,19 +21,19 @@ import com.arjuna.ats.jta.common.JTAEnvironmentBean;
 import com.arjuna.common.util.propertyservice.PropertiesFactory;
 
 import io.quarkus.arc.deployment.AdditionalBeanBuildItem;
-import io.quarkus.arc.deployment.ContextRegistrarBuildItem;
+import io.quarkus.arc.deployment.ContextRegistrationPhaseBuildItem;
+import io.quarkus.arc.deployment.ContextRegistrationPhaseBuildItem.ContextConfiguratorBuildItem;
+import io.quarkus.arc.deployment.CustomScopeBuildItem;
 import io.quarkus.arc.deployment.GeneratedBeanBuildItem;
 import io.quarkus.arc.deployment.GeneratedBeanGizmoAdaptor;
 import io.quarkus.arc.deployment.UnremovableBeanBuildItem;
-import io.quarkus.arc.processor.ContextRegistrar;
-import io.quarkus.deployment.Capability;
 import io.quarkus.deployment.Feature;
 import io.quarkus.deployment.IsTest;
 import io.quarkus.deployment.annotations.BuildProducer;
 import io.quarkus.deployment.annotations.BuildStep;
 import io.quarkus.deployment.annotations.Record;
-import io.quarkus.deployment.builditem.CapabilityBuildItem;
 import io.quarkus.deployment.builditem.FeatureBuildItem;
+import io.quarkus.deployment.builditem.ShutdownContextBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.NativeImageSystemPropertyBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.ReflectiveClassBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.RuntimeInitializedClassBuildItem;
@@ -62,18 +62,14 @@ class NarayanaJtaProcessor {
     }
 
     @BuildStep
-    CapabilityBuildItem capability() {
-        return new CapabilityBuildItem(Capability.TRANSACTIONS);
-    }
-
-    @BuildStep
     @Record(RUNTIME_INIT)
     public void build(NarayanaJtaRecorder recorder,
             BuildProducer<AdditionalBeanBuildItem> additionalBeans,
             BuildProducer<ReflectiveClassBuildItem> reflectiveClass,
             BuildProducer<RuntimeInitializedClassBuildItem> runtimeInit,
             BuildProducer<FeatureBuildItem> feature,
-            TransactionManagerConfiguration transactions) {
+            TransactionManagerConfiguration transactions, ShutdownContextBuildItem shutdownContextBuildItem) {
+        recorder.handleShutdown(shutdownContextBuildItem);
         feature.produce(new FeatureBuildItem(Feature.NARAYANA_JTA));
         additionalBeans.produce(new AdditionalBeanBuildItem(NarayanaJtaProducers.class));
         additionalBeans.produce(new AdditionalBeanBuildItem(CDIDelegatingTransactionManager.class));
@@ -136,15 +132,14 @@ class NarayanaJtaProcessor {
     }
 
     @BuildStep
-    public void transactionContext(
-            BuildProducer<ContextRegistrarBuildItem> contextRegistry) {
+    public ContextConfiguratorBuildItem transactionContext(ContextRegistrationPhaseBuildItem contextRegistrationPhase) {
+        return new ContextConfiguratorBuildItem(contextRegistrationPhase.getContext()
+                .configure(TransactionScoped.class).normal().contextClass(TransactionContext.class));
+    }
 
-        contextRegistry.produce(new ContextRegistrarBuildItem(new ContextRegistrar() {
-            @Override
-            public void register(RegistrationContext registrationContext) {
-                registrationContext.configure(TransactionScoped.class).normal().contextClass(TransactionContext.class).done();
-            }
-        }, TransactionScoped.class));
+    @BuildStep
+    public CustomScopeBuildItem registerScope() {
+        return new CustomScopeBuildItem(TransactionScoped.class);
     }
 
     @BuildStep

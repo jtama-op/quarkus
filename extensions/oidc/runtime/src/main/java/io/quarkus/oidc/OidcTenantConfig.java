@@ -390,7 +390,8 @@ public class OidcTenantConfig extends OidcCommonConfig {
          * For example, if the current request URI is 'https://localhost:8080/service' then a 'redirect_uri' parameter
          * will be set to 'https://localhost:8080/' if this property is set to '/' and be the same as the request URI
          * if this property has not been configured.
-         * Note the original request URI will be restored after the user has authenticated.
+         * Note the original request URI will be restored after the user has authenticated if 'restorePathAfterRedirect' is set
+         * to 'true'.
          */
         @ConfigItem
         public Optional<String> redirectPath = Optional.empty();
@@ -398,9 +399,12 @@ public class OidcTenantConfig extends OidcCommonConfig {
         /**
          * If this property is set to 'true' then the original request URI which was used before
          * the authentication will be restored after the user has been redirected back to the application.
+         * 
+         * Note if `redirectPath` property is not set the the original request URI will be restored even if this property is
+         * disabled.
          */
-        @ConfigItem(defaultValue = "true")
-        public boolean restorePathAfterRedirect = true;
+        @ConfigItem(defaultValue = "false")
+        public boolean restorePathAfterRedirect;
 
         /**
          * Remove the query parameters such as 'code' and 'state' set by the OIDC server on the redirect URI
@@ -457,8 +461,8 @@ public class OidcTenantConfig extends OidcCommonConfig {
          * logout cookies.
          * The `cookie-path-header` property, if set, will be checked first.
          */
-        @ConfigItem
-        public Optional<String> cookiePath = Optional.empty();
+        @ConfigItem(defaultValue = "/")
+        public String cookiePath = "/";
 
         /**
          * Cookie path header parameter value which, if set, identifies the incoming HTTP header
@@ -559,12 +563,12 @@ public class OidcTenantConfig extends OidcCommonConfig {
             this.cookieForceSecure = cookieForceSecure;
         }
 
-        public Optional<String> getCookiePath() {
+        public String getCookiePath() {
             return cookiePath;
         }
 
         public void setCookiePath(String cookiePath) {
-            this.cookiePath = Optional.of(cookiePath);
+            this.cookiePath = cookiePath;
         }
 
         public Optional<String> getCookieDomain() {
@@ -636,6 +640,12 @@ public class OidcTenantConfig extends OidcCommonConfig {
 
         /**
          * Expected issuer 'iss' claim value.
+         * Note this property overrides the `issuer` property which may be set in OpenId Connect provider's well-known
+         * configuration.
+         * If the `iss` claim value varies depending on the host/IP address or tenant id of the provider then you may skip the
+         * issuer verification by setting this property to 'any' but it should be done only when other options (such as
+         * configuring
+         * the provider to use the fixed `iss` claim value) are not possible.
          */
         @ConfigItem
         public Optional<String> issuer = Optional.empty();
@@ -686,13 +696,28 @@ public class OidcTenantConfig extends OidcCommonConfig {
 
         /**
          * Token auto-refresh interval in seconds during the user re-authentication.
-         * If this option is set then the valid ID token will be refreshed if it will expire in less than a number of minutes
+         * If this option is set then the valid ID token will be refreshed if it will expire in less than a number of seconds
          * set by this option. The user will still be authenticated if the ID token can no longer be refreshed but is still
          * valid.
          * This option will be ignored if the 'refresh-expired' property is not enabled.
+         *
+         * Note this property is deprecated and will be removed in one of the next releases.
+         * Please use 'quarkus.oidc.token.refresh-token-time-skew'
          */
         @ConfigItem
+        @Deprecated
         public Optional<Duration> autoRefreshInterval = Optional.empty();
+
+        /**
+         * Refresh token time skew in seconds.
+         * If this property is enabled then the configured number of seconds is added to the current time
+         * when checking whether the access token should be refreshed. If the sum is greater than this access token's
+         * expiration time then a refresh is going to happen.
+         *
+         * This property will be ignored if the 'refresh-expired' property is not enabled.
+         */
+        @ConfigItem
+        public Optional<Duration> refreshTokenTimeSkew = Optional.empty();
 
         /**
          * Forced JWK set refresh interval in minutes.
@@ -706,6 +731,26 @@ public class OidcTenantConfig extends OidcCommonConfig {
          */
         @ConfigItem
         public Optional<String> header = Optional.empty();
+
+        /**
+         * Allow the remote introspection of JWT tokens when no matching JWK key is available.
+         *
+         * Note this property is set to 'true' by default for backward-compatibility reasons and will be set to `false`
+         * instead in one of the next releases.
+         *
+         * Also note this property will be ignored if JWK endpoint URI is not available and introspecting the tokens is
+         * the only verification option.
+         */
+        @ConfigItem(defaultValue = "true")
+        public boolean allowJwtIntrospection = true;
+
+        /**
+         * Allow the remote introspection of the opaque tokens.
+         *
+         * Set this property to 'false' if only JWT tokens are expected.
+         */
+        @ConfigItem(defaultValue = "true")
+        public boolean allowOpaqueTokenIntrospection = true;
 
         public Optional<String> getIssuer() {
             return issuer;
@@ -769,6 +814,30 @@ public class OidcTenantConfig extends OidcCommonConfig {
 
         public void setTokenType(String tokenType) {
             this.tokenType = Optional.of(tokenType);
+        }
+
+        public Optional<Duration> getRefreshTokenTimeSkew() {
+            return refreshTokenTimeSkew;
+        }
+
+        public void setRefreshTokenTimeSkew(Duration refreshTokenTimeSkew) {
+            this.refreshTokenTimeSkew = Optional.of(refreshTokenTimeSkew);
+        }
+
+        public boolean isAllowJwtIntrospection() {
+            return allowJwtIntrospection;
+        }
+
+        public void setAllowJwtIntrospection(boolean allowJwtIntrospection) {
+            this.allowJwtIntrospection = allowJwtIntrospection;
+        }
+
+        public boolean isAllowOpaqueTokenIntrospection() {
+            return allowOpaqueTokenIntrospection;
+        }
+
+        public void setAllowOpaqueTokenIntrospection(boolean allowOpaqueTokenIntrospection) {
+            this.allowOpaqueTokenIntrospection = allowOpaqueTokenIntrospection;
         }
     }
 

@@ -36,7 +36,6 @@ public abstract class AbstractLambdaPollLoop {
     public void startPollLoop(ShutdownContext context) {
 
         final AtomicBoolean running = new AtomicBoolean(true);
-
         final Thread pollingThread = new Thread(new Runnable() {
             @SuppressWarnings("unchecked")
             @Override
@@ -73,8 +72,11 @@ public abstract class AbstractLambdaPollLoop {
                                     }
                                 } else {
                                     Object input = null;
-                                    if (running.get() && getInputReader() != null) {
-                                        input = getInputReader().readValue(requestConnection.getInputStream());
+                                    if (running.get()) {
+                                        LambdaInputReader inputReader = getInputReader();
+                                        if (inputReader != null) {
+                                            input = inputReader.readValue(requestConnection.getInputStream());
+                                        }
                                         Object output = processRequest(input, createContext(requestConnection));
                                         postResponse(url, output);
                                     }
@@ -122,8 +124,11 @@ public abstract class AbstractLambdaPollLoop {
                 }
             }
         }, "Lambda Thread");
+        pollingThread.setDaemon(true);
         context.addShutdownTask(() -> {
             running.set(false);
+            //note that this does not seem to be 100% reliable in unblocking the thread
+            //which is why it is a daemon.
             pollingThread.interrupt();
         });
         pollingThread.start();

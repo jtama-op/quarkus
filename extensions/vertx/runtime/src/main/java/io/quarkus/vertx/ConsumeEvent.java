@@ -40,11 +40,19 @@ import io.vertx.core.eventbus.MessageCodec;
  * </pre>
  * 
  * <p>
- * The CDI request context is active during notification of the registered message consumer.
+ * The CDI request context is always active during notification of the registered message consumer.
+ * <p>
+ * If a method annotated with {@link ConsumeEvent} throws an exception then:
+ * <ul>
+ * <li>if a reply handler is set the failure is propagated back to the sender via an
+ * {@link io.vertx.core.eventbus.ReplyException} with code {@link #FAILURE_CODE} and the exception message,</li>
+ * <li>if no reply handler is set then the exception is rethrown (and wrapped in a {@link java.lang.RuntimeException} if
+ * necessary) and can be handled by the default exception handler, i.e. {@link io.vertx.core.Vertx#exceptionHandler().}</li>
+ * </ul>
  * 
  * @see io.vertx.core.eventbus.EventBus
  */
-@Target({ METHOD })
+@Target(METHOD)
 @Retention(RUNTIME)
 public @interface ConsumeEvent {
 
@@ -84,11 +92,18 @@ public @interface ConsumeEvent {
     boolean blocking() default false;
 
     /**
+     * @return {@code true} if the <em>blocking</em> consumption of the event must be ordered, meaning that the method
+     *         won't be called concurrently. Instead it serializes all the invocations based on the event order.
+     *         {@code ordered} must be used in conjunction with {@code blocking=true} or {@code @Blocking}.
+     * @see io.vertx.core.Vertx#executeBlocking(io.vertx.core.Handler, boolean, io.vertx.core.Handler)
+     */
+    boolean ordered() default false;
+
+    /**
      * 
      * @return {@code null} if it should use a default MessageCodec
      * @see io.quarkus.vertx.LocalEventBusCodec
      */
-    @SuppressWarnings("rawtypes")
     Class<? extends MessageCodec> codec() default LocalEventBusCodec.class;
 
 }

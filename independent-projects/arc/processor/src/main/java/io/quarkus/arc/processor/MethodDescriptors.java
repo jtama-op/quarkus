@@ -10,6 +10,7 @@ import io.quarkus.arc.InjectableInterceptor;
 import io.quarkus.arc.InjectableReferenceProvider;
 import io.quarkus.arc.impl.ClientProxies;
 import io.quarkus.arc.impl.CreationalContextImpl;
+import io.quarkus.arc.impl.DecoratorDelegateProvider;
 import io.quarkus.arc.impl.FixedValueSupplier;
 import io.quarkus.arc.impl.InjectableReferenceProviders;
 import io.quarkus.arc.impl.InterceptedMethodMetadata;
@@ -79,12 +80,30 @@ public final class MethodDescriptors {
     public static final MethodDescriptor OBJECT_EQUALS = MethodDescriptor.ofMethod(Object.class, "equals", boolean.class,
             Object.class);
 
+    /**
+     * No longer used - will be deleted
+     * 
+     * @deprecated
+     */
+    @Deprecated
     public static final MethodDescriptor OBJECT_HASH_CODE = MethodDescriptor.ofMethod(Object.class, "hashCode", int.class);
 
+    /**
+     * No longer used - will be deleted
+     * 
+     * @deprecated
+     */
+    @Deprecated
     public static final MethodDescriptor OBJECT_TO_STRING = MethodDescriptor.ofMethod(Object.class, "toString", String.class);
 
     public static final MethodDescriptor OBJECT_CONSTRUCTOR = MethodDescriptor.ofConstructor(Object.class);
 
+    /**
+     * No longer used - will be deleted
+     * 
+     * @deprecated
+     */
+    @Deprecated
     public static final MethodDescriptor OBJECTS_REFERENCE_EQUALS = MethodDescriptor.ofMethod(Objects.class, "referenceEquals",
             boolean.class, Object.class, Object.class);
 
@@ -248,6 +267,13 @@ public final class MethodDescriptors {
 
     public static final MethodDescriptor CLIENT_PROXIES_GET_DELEGATE = MethodDescriptor.ofMethod(ClientProxies.class,
             "getDelegate", Object.class, InjectableBean.class);
+
+    public static final MethodDescriptor DECORATOR_DELEGATE_PROVIDER_SET = MethodDescriptor
+            .ofMethod(DecoratorDelegateProvider.class, "set", Object.class, Object.class);
+    public static final MethodDescriptor DECORATOR_DELEGATE_PROVIDER_UNSET = MethodDescriptor
+            .ofMethod(DecoratorDelegateProvider.class, "unset", void.class);
+    public static final MethodDescriptor DECORATOR_DELEGATE_PROVIDER_GET = MethodDescriptor
+            .ofMethod(DecoratorDelegateProvider.class, "get", Object.class);
 
     private MethodDescriptors() {
     }

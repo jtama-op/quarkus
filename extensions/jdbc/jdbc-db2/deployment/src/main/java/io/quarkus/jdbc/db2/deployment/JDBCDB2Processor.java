@@ -1,10 +1,11 @@
 package io.quarkus.jdbc.db2.deployment;
 
-import io.quarkus.agroal.spi.DefaultDataSourceDbKindBuildItem;
 import io.quarkus.agroal.spi.JdbcDriverBuildItem;
 import io.quarkus.arc.deployment.AdditionalBeanBuildItem;
 import io.quarkus.arc.processor.BuiltinScope;
 import io.quarkus.datasource.common.runtime.DatabaseKind;
+import io.quarkus.datasource.deployment.spi.DefaultDataSourceDbKindBuildItem;
+import io.quarkus.datasource.deployment.spi.DevServicesDatasourceConfigurationHandlerBuildItem;
 import io.quarkus.deployment.Capabilities;
 import io.quarkus.deployment.Capability;
 import io.quarkus.deployment.Feature;
@@ -30,6 +31,11 @@ public class JDBCDB2Processor {
             SslNativeConfigBuildItem sslNativeConfigBuildItem) {
         jdbcDriver.produce(new JdbcDriverBuildItem(DatabaseKind.DB2, "com.ibm.db2.jcc.DB2Driver",
                 "com.ibm.db2.jcc.DB2XADataSource"));
+    }
+
+    @BuildStep
+    DevServicesDatasourceConfigurationHandlerBuildItem devDbHandler() {
+        return DevServicesDatasourceConfigurationHandlerBuildItem.jdbc(DatabaseKind.DB2);
     }
 
     @BuildStep
@@ -68,7 +74,7 @@ public class JDBCDB2Processor {
             serviceProvider.produce(
                     new ServiceProviderBuildItem("io.quarkus.kubernetes.service.binding.runtime.ServiceBindingConverter",
                             DB2ServiceBindingConverter.class.getName()));
-            dbKind.produce(new DefaultDataSourceDbKindBuildItem(DatabaseKind.DB2));
         }
+        dbKind.produce(new DefaultDataSourceDbKindBuildItem(DatabaseKind.DB2));
     }
 }

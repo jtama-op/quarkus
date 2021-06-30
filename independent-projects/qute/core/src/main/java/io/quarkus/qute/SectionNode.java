@@ -7,14 +7,16 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.function.Function;
 
 /**
  * Section node.
  */
 class SectionNode implements TemplateNode {
 
-    static Builder builder(String helperName, Origin origin) {
-        return new Builder(helperName, origin);
+    static Builder builder(String helperName, Origin origin, Function<String, Expression> expressionFun,
+            Function<String, TemplateException> errorFun) {
+        return new Builder(helperName, origin, expressionFun, errorFun);
     }
 
     final String name;
@@ -24,7 +26,7 @@ class SectionNode implements TemplateNode {
 
     SectionNode(String name, List<SectionBlock> blocks, SectionHelper helper, Origin origin) {
         this.name = name;
-        this.blocks = ImmutableList.copyOf(blocks);
+        this.blocks = blocks;
         this.helper = helper;
         this.origin = origin;
     }
@@ -64,19 +66,36 @@ class SectionNode implements TemplateNode {
 
         final String helperName;
         final Origin origin;
-        private final List<SectionBlock> blocks;
+        private final List<SectionBlock.Builder> blocks;
+        private SectionBlock.Builder currentBlock;
         SectionHelperFactory<?> factory;
         private EngineImpl engine;
 
-        public Builder(String helperName, Origin origin) {
+        public Builder(String helperName, Origin origin, Function<String, Expression> expressionFun,
+                Function<String, TemplateException> errorFun) {
             this.helperName = helperName;
             this.origin = origin;
             this.blocks = new ArrayList<>();
+            // The main block is always present 
+            addBlock(SectionBlock
+                    .builder(SectionHelperFactory.MAIN_BLOCK_NAME, expressionFun, errorFun)
+                    .setOrigin(origin));
         }
 
-        Builder addBlock(SectionBlock block) {
+        Builder addBlock(SectionBlock.Builder block) {
             this.blocks.add(block);
+            this.currentBlock = block;
             return this;
+        }
+
+        Builder endBlock() {
+            // Set main as the current
+            this.currentBlock = blocks.get(0);
+            return this;
+        }
+
+        SectionBlock.Builder currentBlock() {
+            return currentBlock;
         }
 
         Builder setHelperFactory(SectionHelperFactory<?> factory) {
@@ -90,6 +109,11 @@ class SectionNode implements TemplateNode {
         }
 
         SectionNode build() {
+            ImmutableList.Builder<SectionBlock> builder = ImmutableList.builder();
+            for (SectionBlock.Builder block : blocks) {
+                builder.add(block.build());
+            }
+            List<SectionBlock> blocks = builder.build();
             return new SectionNode(helperName, blocks,
                     factory.initialize(new SectionInitContextImpl(engine, blocks, this::createParserError)), origin);
         }
@@ -123,22 +147,31 @@ class SectionNode implements TemplateNode {
             }
             int size = block.nodes.size();
             if (size == 1) {
+                // Single node in the block
                 return block.nodes.get(0).resolve(context);
             }
             CompletableFuture<ResultNode> result = new CompletableFuture<ResultNode>();
+
+            // Collect async results first 
             @SuppressWarnings("unchecked")
             CompletableFuture<ResultNode>[] allResults = new CompletableFuture[size];
-            List<CompletableFuture<ResultNode>> asyncResults = new LinkedList<>();
+            List<CompletableFuture<ResultNode>> asyncResults = null;
             int idx = 0;
             for (TemplateNode node : block.nodes) {
                 CompletableFuture<ResultNode> nodeResult = node.resolve(context).toCompletableFuture();
                 allResults[idx++] = nodeResult;
                 if (node.isConstant()) {
+                    // Constant blocks do not need to be resolved 
                     continue;
+                }
+                if (asyncResults == null) {
+                    asyncResults = new LinkedList<>();
                 }
                 asyncResults.add(nodeResult);
             }
-            if (asyncResults.isEmpty()) {
+
+            if (asyncResults == null) {
+                // No async results present
                 result.complete(new MultiResultNode(allResults));
             } else {
                 CompletionStage<?> cs;

@@ -9,7 +9,9 @@ import java.util.Map.Entry;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.ext.MessageBodyWriter;
 import org.jboss.resteasy.reactive.common.util.ServerMediaType;
+import org.jboss.resteasy.reactive.server.handlers.ResourceRequestFilterHandler;
 import org.jboss.resteasy.reactive.server.mapping.RuntimeResource;
+import org.jboss.resteasy.reactive.server.spi.ServerRestHandler;
 
 public class ScoreSystem {
 
@@ -27,23 +29,44 @@ public class ScoreSystem {
 
     public static class EndpointScore {
 
+        public final String className;
         public final String httpMethod;
         public final String fullPath;
         public final List<MediaType> produces;
         public final List<MediaType> consumes;
         public final Map<Category, List<Diagnostic>> diagnostics;
         public final int score;
+        public final List<RequestFilterEntry> requestFilterEntries;
 
-        public EndpointScore(String httpMethod, String fullPath, List<MediaType> produces, List<MediaType> consumes,
-                Map<Category, List<Diagnostic>> diagnostics, int score) {
+        public EndpointScore(String className, String httpMethod, String fullPath, List<MediaType> produces,
+                List<MediaType> consumes,
+                Map<Category, List<Diagnostic>> diagnostics, int score, List<RequestFilterEntry> requestFilterEntries) {
+            this.className = className;
             this.httpMethod = httpMethod;
             this.fullPath = fullPath;
             this.produces = produces;
             this.consumes = consumes;
             this.diagnostics = diagnostics;
             this.score = score;
+            this.requestFilterEntries = requestFilterEntries;
         }
 
+    }
+
+    public static class RequestFilterEntry {
+        public final String name;
+        public final boolean preMatch;
+
+        public String getName() {
+            String removeSubClass = name.replace("_Subclass", "");
+            String finalFilterName = removeSubClass.replaceAll("\\$.*?\\$", "::");
+            return finalFilterName;
+        }
+
+        public RequestFilterEntry(String name, boolean preMatch) {
+            this.name = name;
+            this.preMatch = preMatch;
+        }
     }
 
     public static class Diagnostic {
@@ -95,7 +118,7 @@ public class ScoreSystem {
     public final static RuntimeResourceVisitor ScoreVisitor = new RuntimeResourceVisitor() {
         int overallScore = 0;
         int overallTotal = 0;
-        List<EndpointScore> endpoints = new ArrayList<>();
+        final List<EndpointScore> endpoints = new ArrayList<>();
 
         @Override
         public void visitRuntimeResource(String httpMethod, String fullPath, RuntimeResource runtimeResource) {
@@ -105,6 +128,16 @@ public class ScoreSystem {
                 if ((serverMediaType.getSortedOriginalMediaTypes() != null)
                         && serverMediaType.getSortedOriginalMediaTypes().length >= 1) {
                     produces = Arrays.asList(serverMediaType.getSortedOriginalMediaTypes());
+                }
+            }
+
+            ServerRestHandler[] handlerChain = runtimeResource.getHandlerChain();
+            List<RequestFilterEntry> requestFilters = new ArrayList<>();
+            for (ServerRestHandler serverRestHandler : handlerChain) {
+                if (serverRestHandler instanceof ResourceRequestFilterHandler) {
+                    ResourceRequestFilterHandler requestFilterHandler = (ResourceRequestFilterHandler) serverRestHandler;
+                    requestFilters.add(new RequestFilterEntry(requestFilterHandler.getFilter().getClass().getName(),
+                            requestFilterHandler.isPreMatch()));
                 }
             }
             List<MediaType> consumes = runtimeResource.getConsumes();
@@ -123,7 +156,9 @@ public class ScoreSystem {
             score = (int) Math.floor(((float) score / (float) total) * 100f);
             overallScore += score;
             overallTotal += 100;
-            endpoints.add(new EndpointScore(httpMethod, fullPath, produces, consumes, runtimeResource.getScore(), score));
+            endpoints.add(new EndpointScore(runtimeResource.getResourceClass().getName(), httpMethod, fullPath, produces,
+                    consumes, runtimeResource.getScore(), score,
+                    requestFilters));
         }
 
         @Override
@@ -135,6 +170,15 @@ public class ScoreSystem {
             // let's bring it to 100
             overallScore = (int) Math.floor(((float) overallScore / (float) overallTotal) * 100f);
             latestScores = new EndpointScores(overallScore, endpoints);
+        }
+
+        @Override
+        public void visitStart() {
+            //clear the endpoints
+            endpoints.clear();
+            //reset overallScore and overallTotal
+            overallScore = 0;
+            overallTotal = 0;
         }
     };
 }

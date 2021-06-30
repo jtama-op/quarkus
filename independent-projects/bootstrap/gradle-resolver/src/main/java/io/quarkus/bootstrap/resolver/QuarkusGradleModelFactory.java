@@ -1,6 +1,6 @@
 package io.quarkus.bootstrap.resolver;
 
-import io.quarkus.bootstrap.resolver.model.QuarkusModel;
+import io.quarkus.bootstrap.model.gradle.QuarkusModel;
 import java.io.File;
 import java.util.Collections;
 import java.util.List;
@@ -19,6 +19,7 @@ public class QuarkusGradleModelFactory {
                 .forProjectDirectory(projectDir)
                 .connect()) {
             connection.newBuild().forTasks(tasks).addJvmArguments(jvmArgs).run();
+
             return connection.action(new QuarkusModelBuildAction(mode)).run();
         }
     }
@@ -28,7 +29,9 @@ public class QuarkusGradleModelFactory {
                 .forProjectDirectory(projectDir)
                 .connect()) {
             final ModelBuilder<QuarkusModel> modelBuilder = connection.model(QuarkusModel.class);
-            modelBuilder.forTasks(tasks);
+            if (tasks.length != 0) {
+                modelBuilder.forTasks(tasks);
+            }
             return modelBuilder.get();
         }
     }

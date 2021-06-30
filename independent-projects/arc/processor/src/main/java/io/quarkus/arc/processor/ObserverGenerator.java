@@ -287,18 +287,18 @@ public class ObserverGenerator extends AbstractGenerator {
         MethodCreator notify = observerCreator.getMethodCreator("notify", void.class, EventContext.class)
                 .setModifiers(ACC_PUBLIC);
 
-        if (observer.isSynthetic()) {
-            // Synthetic observers generate the notify method themselves
-            observer.getNotify().accept(notify);
-            return;
-        }
-
         if (mockable) {
             // If mockable and mocked then just return from the method
             ResultHandle mock = notify.readInstanceField(
                     FieldDescriptor.of(observerCreator.getClassName(), MOCK_FIELD, boolean.class.getName()),
                     notify.getThis());
             notify.ifTrue(mock).trueBranch().returnValue(null);
+        }
+
+        if (observer.isSynthetic()) {
+            // Synthetic observers generate the notify method themselves
+            observer.getNotify().accept(notify);
+            return;
         }
 
         boolean isStatic = Modifier.isStatic(observer.getObserverMethod().flags());
@@ -517,7 +517,7 @@ public class ObserverGenerator extends AbstractGenerator {
                                         Supplier.class, java.lang.reflect.Type.class,
                                         Set.class, Set.class, Member.class, int.class),
                                 constructor.loadNull(), delegateSupplier,
-                                Types.getTypeHandle(constructor, injectionPoint.getRequiredType()),
+                                Types.getTypeHandle(constructor, injectionPoint.getType()),
                                 requiredQualifiersHandle, annotationsHandle, javaMemberHandle,
                                 constructor.load(injectionPoint.getPosition()));
                         ResultHandle wrapSupplierHandle = constructor.newInstance(

@@ -12,10 +12,6 @@
     <artifactId>quarkus-qute-deployment</artifactId>
     <name>Quarkus - Qute - Deployment</name>
 
-    <properties>
-        <maven.compiler.parameters>true</maven.compiler.parameters>
-    </properties>
-
     <dependencies>
         <dependency>
             <groupId>io.quarkus</groupId>
@@ -24,6 +20,11 @@
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-arc-deployment</artifactId>
+        </dependency>
+        <!-- Panache SPI-like module to collect entity classes -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-panache-common-deployment</artifactId>
         </dependency>
         <dependency>
             <groupId>io.quarkus.qute</groupId>
@@ -49,7 +50,7 @@
         </dependency>
         <dependency>
             <groupId>io.quarkus</groupId>
-            <artifactId>quarkus-vertx-http-deployment</artifactId>
+            <artifactId>quarkus-vertx-web-deployment</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>

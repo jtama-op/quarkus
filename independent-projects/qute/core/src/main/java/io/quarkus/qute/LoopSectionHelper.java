@@ -2,8 +2,11 @@ package io.quarkus.qute;
 
 import static io.quarkus.qute.Parameter.EMPTY;
 
+import io.quarkus.qute.SectionHelperFactory.SectionInitContext;
+import java.lang.reflect.Array;
 import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -19,13 +22,18 @@ import java.util.stream.Stream;
 public class LoopSectionHelper implements SectionHelper {
 
     private static final String DEFAULT_ALIAS = "it";
+    private static final String ELSE = "else";
+    private static final String ALIAS = "alias";
+    private static final String ITERABLE = "iterable";
 
     private final String alias;
     private final Expression iterable;
+    private final SectionBlock elseBlock;
 
-    LoopSectionHelper(String alias, Expression iterable) {
-        this.alias = Parameter.EMPTY.equals(alias) ? DEFAULT_ALIAS : alias;
-        this.iterable = Objects.requireNonNull(iterable);
+    LoopSectionHelper(SectionInitContext context) {
+        this.alias = context.getParameterOrDefault(ALIAS, DEFAULT_ALIAS);
+        this.iterable = Objects.requireNonNull(context.getExpression(ITERABLE));
+        this.elseBlock = context.getBlock(ELSE);
     }
 
     @SuppressWarnings("unchecked")
@@ -34,10 +42,11 @@ public class LoopSectionHelper implements SectionHelper {
         return context.resolutionContext().evaluate(iterable).thenCompose(it -> {
             if (it == null) {
                 throw new TemplateException(String.format(
-                        "Loop section error in template %s on line %s: [%s] resolved to [null] which is not iterable",
+                        "Iteration error in template [%s] on line %s: {%s} resolved to null, use {%<s.orEmpty} to ignore this error",
                         iterable.getOrigin().getTemplateId(), iterable.getOrigin().getLine(), iterable.toOriginalString()));
             }
-            List<CompletionStage<ResultNode>> results = new ArrayList<>();
+            // Try to extract the capacity for collections, maps and arrays to avoid resize
+            List<CompletionStage<ResultNode>> results = new ArrayList<>(extractSize(it));
             Iterator<?> iterator = extractIterator(it);
             int idx = 0;
             // Ideally, we should not block here but we still need to retain the order of results
@@ -45,7 +54,12 @@ public class LoopSectionHelper implements SectionHelper {
                 results.add(nextElement(iterator.next(), idx++, iterator.hasNext(), context));
             }
             if (results.isEmpty()) {
-                return ResultNode.NOOP;
+                // Execute the {#else} block if present
+                if (elseBlock != null) {
+                    return context.execute(elseBlock, context.resolutionContext());
+                } else {
+                    return ResultNode.NOOP;
+                }
             }
             if (results.size() == 1) {
                 return results.get(0);
@@ -69,6 +83,19 @@ public class LoopSectionHelper implements SectionHelper {
         });
     }
 
+    private static int extractSize(Object it) {
+        if (it instanceof Collection) {
+            return ((Collection<?>) it).size();
+        } else if (it instanceof Map) {
+            return ((Map<?, ?>) it).size();
+        } else if (it.getClass().isArray()) {
+            return Array.getLength(it);
+        } else if (it instanceof Integer) {
+            return ((Integer) it);
+        }
+        return 10;
+    }
+
     private Iterator<?> extractIterator(Object it) {
         if (it instanceof Iterable) {
             return ((Iterable<?>) it).iterator();
@@ -81,12 +108,26 @@ public class LoopSectionHelper implements SectionHelper {
         } else if (it instanceof Integer) {
             return IntStream.rangeClosed(1, (Integer) it).iterator();
         } else if (it.getClass().isArray()) {
-            return Arrays.stream((Object[]) it).iterator();
+            int length = Array.getLength(it);
+            List<Object> elements = new ArrayList<>(length);
+            for (int i = 0; i < length; i++) {
+                // The val is automatically wrapped for primitive types
+                elements.add(Array.get(it, i));
+            }
+            return elements.iterator();
         } else {
-            throw new TemplateException(String.format(
-                    "Loop section error in template %s on line %s: [%s] resolved to [%s] which is not iterable",
-                    iterable.getOrigin().getTemplateId(), iterable.getOrigin().getLine(), iterable.toOriginalString(),
-                    it.getClass().getName()));
+            String msg;
+            if (Results.isNotFound(it)) {
+                msg = String.format(
+                        "Iteration error in template [%s] on line %s: {%s} not found, use {%<s.orEmpty} to ignore this error",
+                        iterable.getOrigin().getTemplateId(), iterable.getOrigin().getLine(), iterable.toOriginalString());
+            } else {
+                msg = String.format(
+                        "Iteration error in template [%s] on line %s: {%s} resolved to [%s] which is not iterable",
+                        iterable.getOrigin().getTemplateId(), iterable.getOrigin().getLine(), iterable.toOriginalString(),
+                        it.getClass().getName());
+            }
+            throw new TemplateException(msg);
         }
     }
 
@@ -100,9 +141,7 @@ public class LoopSectionHelper implements SectionHelper {
 
         public static final String HINT_ELEMENT = "<loop-element>";
         public static final String HINT_PREFIX = "<loop#";
-        private static final String ALIAS = "alias";
         private static final String IN = "in";
-        private static final String ITERABLE = "iterable";
 
         @Override
         public List<String> getDefaultAliases() {
@@ -118,9 +157,13 @@ public class LoopSectionHelper implements SectionHelper {
                     .build();
         }
 
+        public List<String> getBlockLabels() {
+            return Collections.singletonList(ELSE);
+        }
+
         @Override
         public LoopSectionHelper initialize(SectionInitContext context) {
-            return new LoopSectionHelper(context.getParameter(ALIAS), context.getExpression(ITERABLE));
+            return new LoopSectionHelper(context);
         }
 
         @Override
@@ -130,8 +173,7 @@ public class LoopSectionHelper implements SectionHelper {
                 if (iterable == null) {
                     iterable = ValueResolvers.THIS;
                 }
-                // foo.items
-                // > |org.acme.Foo|.items<loop-element>
+                // foo.items becomes |org.acme.Foo|.items<loop-element>
                 previousScope.setLastPartHint(HINT_ELEMENT);
                 Expression iterableExpr = block.addExpression(ITERABLE, iterable);
                 previousScope.setLastPartHint(null);
@@ -139,11 +181,19 @@ public class LoopSectionHelper implements SectionHelper {
                 String alias = block.getParameters().get(ALIAS);
 
                 if (iterableExpr.hasTypeInfo()) {
-                    // it.name
-                    // > it<loop#123>.name
+                    // it.name becomes it<loop#123>.name
                     alias = alias.equals(Parameter.EMPTY) ? DEFAULT_ALIAS : alias;
                     Scope newScope = new Scope(previousScope);
                     newScope.putBinding(alias, alias + HINT_PREFIX + iterableExpr.getGeneratedId() + ">");
+                    // Put bindings for iteration metadata
+                    newScope.putBinding("count", Expressions.typeInfoFrom(Integer.class.getName()));
+                    newScope.putBinding("index", Expressions.typeInfoFrom(Integer.class.getName()));
+                    newScope.putBinding("indexParity", Expressions.typeInfoFrom(String.class.getName()));
+                    newScope.putBinding("hasNext", Expressions.typeInfoFrom(Boolean.class.getName()));
+                    newScope.putBinding("odd", Expressions.typeInfoFrom(Boolean.class.getName()));
+                    newScope.putBinding("isOdd", Expressions.typeInfoFrom(Boolean.class.getName()));
+                    newScope.putBinding("even", Expressions.typeInfoFrom(Boolean.class.getName()));
+                    newScope.putBinding("isEven", Expressions.typeInfoFrom(Boolean.class.getName()));
                     return newScope;
                 } else {
                     // Make sure we do not try to validate against the parent context
@@ -196,7 +246,7 @@ public class LoopSectionHelper implements SectionHelper {
                 case "even":
                     return (index % 2 != 0) ? Results.TRUE : Results.FALSE;
                 default:
-                    return Results.NOT_FOUND;
+                    return Results.notFound(key);
             }
         }
 

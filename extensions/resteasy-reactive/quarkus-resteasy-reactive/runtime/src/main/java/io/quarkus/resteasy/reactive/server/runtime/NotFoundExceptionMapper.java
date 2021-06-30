@@ -51,7 +51,7 @@ public class NotFoundExceptionMapper {
 
     private final static Variant JSON_VARIANT = new Variant(MediaType.APPLICATION_JSON_TYPE, (String) null, null);
     private final static Variant HTML_VARIANT = new Variant(MediaType.TEXT_HTML_TYPE, (String) null, null);
-    private final static List<Variant> VARIANTS = Arrays.asList(JSON_VARIANT, HTML_VARIANT);
+    private final static List<Variant> VARIANTS = List.of(JSON_VARIANT, HTML_VARIANT);
     static volatile List<RequestMapper.RequestPath<RestInitialHandler.InitialMatch>> classMappers;
 
     private volatile static String httpRoot = "";
@@ -173,7 +173,7 @@ public class NotFoundExceptionMapper {
             if (!additionalEndpoints.isEmpty()) {
                 sb.resourcesStart("Additional endpoints");
                 for (AdditionalRouteDescription additionalEndpoint : additionalEndpoints) {
-                    sb.staticResourcePath(adjustRoot(httpRoot, additionalEndpoint.getUri()),
+                    sb.staticResourcePath(additionalEndpoint.getUri(),
                             additionalEndpoint.getDescription());
                 }
                 sb.resourcesEnd();

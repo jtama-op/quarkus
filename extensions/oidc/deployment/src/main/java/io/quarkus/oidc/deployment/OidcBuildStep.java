@@ -22,6 +22,7 @@ import io.quarkus.deployment.annotations.BuildStep;
 import io.quarkus.deployment.annotations.ExecutionTime;
 import io.quarkus.deployment.annotations.Record;
 import io.quarkus.deployment.builditem.EnableAllSecurityServicesBuildItem;
+import io.quarkus.deployment.builditem.ExtensionSslNativeSupportBuildItem;
 import io.quarkus.deployment.builditem.FeatureBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.ReflectiveClassBuildItem;
 import io.quarkus.oidc.SecurityEvent;
@@ -30,6 +31,7 @@ import io.quarkus.oidc.runtime.DefaultTokenStateManager;
 import io.quarkus.oidc.runtime.OidcAuthenticationMechanism;
 import io.quarkus.oidc.runtime.OidcBuildTimeConfig;
 import io.quarkus.oidc.runtime.OidcConfig;
+import io.quarkus.oidc.runtime.OidcConfigurationMetadataProducer;
 import io.quarkus.oidc.runtime.OidcIdentityProvider;
 import io.quarkus.oidc.runtime.OidcJsonWebTokenProducer;
 import io.quarkus.oidc.runtime.OidcRecorder;
@@ -72,6 +74,7 @@ public class OidcBuildStep {
         builder.addBeanClass(OidcAuthenticationMechanism.class)
                 .addBeanClass(OidcJsonWebTokenProducer.class)
                 .addBeanClass(OidcTokenCredentialProducer.class)
+                .addBeanClass(OidcConfigurationMetadataProducer.class)
                 .addBeanClass(OidcIdentityProvider.class)
                 .addBeanClass(DefaultTenantConfigResolver.class)
                 .addBeanClass(DefaultTokenStateManager.class);
@@ -81,6 +84,11 @@ public class OidcBuildStep {
     @BuildStep(onlyIf = IsEnabled.class)
     EnableAllSecurityServicesBuildItem security() {
         return new EnableAllSecurityServicesBuildItem();
+    }
+
+    @BuildStep(onlyIf = IsEnabled.class)
+    ExtensionSslNativeSupportBuildItem enableSslInNative() {
+        return new ExtensionSslNativeSupportBuildItem(Feature.OIDC);
     }
 
     @Record(ExecutionTime.RUNTIME_INIT)

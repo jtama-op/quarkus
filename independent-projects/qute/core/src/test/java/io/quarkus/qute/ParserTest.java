@@ -11,8 +11,11 @@ import java.io.Reader;
 import java.io.StringReader;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
@@ -74,11 +77,12 @@ public class ParserTest {
                 + "{it.name}"
                 + "{/each}"
                 + "{inject:bean.name}"
-                + "{#each inject:bean.labels}"
+                + "{#each inject:bean.labels('foo')}"
                 + "{it.value}"
                 + "{/each}"
                 + "{#set baz=foo.bar}"
                 + "{baz.name}"
+                + "{baz.getName(baz.age)}"
                 + "{/set}"
                 + "{#for foo in foos}"
                 + "{foo.baz}"
@@ -100,12 +104,13 @@ public class ParserTest {
 
         assertExpr(expressions, "inject:bean.name", 2, "inject:bean.name");
 
-        Expression beanLabels = find(expressions, "inject:bean.labels");
-        assertExpr(expressions, "inject:bean.labels", 2, "inject:bean.labels<loop-element>");
+        Expression beanLabels = find(expressions, "inject:bean.labels('foo')");
+        assertExpr(expressions, "inject:bean.labels('foo')", 2, "inject:bean.labels('foo')<loop-element>");
         assertExpr(expressions, "it.value", 2, "it<loop#" + beanLabels.getGeneratedId() + ">.value");
 
+        Expression fooBar = find(expressions, "foo.bar");
         assertExpr(expressions, "foo.bar", 2, "|org.acme.Foo|.bar");
-        assertExpr(expressions, "baz.name", 2, "baz<set#10>.name");
+        assertExpr(expressions, "baz.name", 2, "baz<set#" + fooBar.getGeneratedId() + ">.name");
         assertExpr(expressions, "foo.baz", 2, null);
         assertExpr(expressions, "foo.call(labels,bar)", 2, "|org.acme.Foo|.call(labels,bar)");
 
@@ -178,7 +183,7 @@ public class ParserTest {
                 "user.loggedIn");
         assertParams("this.get('name') is null", "this.get('name')", "is", "null");
         assertParserError("{#if 'foo is null}{/}",
-                "Parser error on line 1: unterminated string literal or composite parameter detected for [#if 'foo is null]",
+                "Parser error on line 1: unexpected non-text buffer at the end of the template - unterminated string literal: #if 'foo is null}{/}",
                 1);
         assertParserError("{#if (foo || bar}{/}",
                 "Parser error on line 1: unterminated string literal or composite parameter detected for [#if (foo || bar]", 1);
@@ -285,6 +290,81 @@ public class ParserTest {
         assertEquals("${foo}::true", template.data("bar", true).render());
     }
 
+    @Test
+    public void testStringLiteralWithTagEndDelimiter() {
+        Engine engine = Engine.builder().addDefaults().addValueResolver(ValueResolver.builder().applyToBaseClass(String.class)
+                .applyToName("lines").resolveSync(ctx -> ctx.getBase().toString().split("\\n")).build()).build();
+        Map<String, String> map = new HashMap<>();
+        map.put("path", "/foo/bar");
+        Template template = engine.parse("{#for line in map.get('{foo}').lines.orEmpty}{line}{/for}");
+        assertEquals("", template.data("map", map).render());
+        template = engine.parse("{#for line in map.get(foo).lines}{line}{/for}");
+        assertEquals("/foo/bar", template.data("map", map, "foo", "path").render());
+
+        assertParserError("{#if map.get(\"{foo})}Bye...{/if}",
+                "Parser error on line 1: unexpected non-text buffer at the end of the template - unterminated string literal: #if map.get(\"{foo})}Bye...{/if}",
+                1);
+    }
+
+    @Test
+    public void testNestedHintValidation() {
+        Engine engine = Engine.builder().addDefaults().addValueResolver(new ReflectionValueResolver()).build();
+        Template loopLetLet = engine.parse("{@org.acme.Foo foo}"
+                + "{#for item in foo.items}"
+                + "{#let names=item.names}"
+                + "{#let size=names.size}"
+                + "{size}"
+                + "{/let}"
+                + "{/let}"
+                + "{/for}");
+        List<Expression> expressions = loopLetLet.getExpressions();
+        assertExpr(expressions, "foo.items", 2, "|org.acme.Foo|.items<loop-element>");
+        Expression itemNames = find(expressions, "item.names");
+        assertExpr(expressions, "names.size", 2, "names<set#" + itemNames.getGeneratedId() + ">.size");
+        Expression namesSize = find(expressions, "names.size");
+        assertExpr(expressions, "size", 1, "size<set#" + namesSize.getGeneratedId() + ">");
+        assertEquals("2", loopLetLet.data("foo", new Foo()).render());
+
+        Template loopLetLoopLet = engine.parse("{@org.acme.Foo foo}"
+                + "{#for item in foo.items}"
+                + "{#let names=item.names}"
+                + "{#for name in names}"
+                + "{#let upperCase=name.toUpperCase}"
+                + ":{upperCase.length}"
+                + "{/let}"
+                + "{/for}"
+                + "{/let}"
+                + "{/for}");
+        expressions = loopLetLoopLet.getExpressions();
+        assertExpr(expressions, "foo.items", 2, "|org.acme.Foo|.items<loop-element>");
+        Expression fooItems = find(expressions, "foo.items");
+        assertExpr(expressions, "item.names", 2, "item<loop#" + fooItems.getGeneratedId() + ">.names");
+        itemNames = find(expressions, "item.names");
+        // Note the 2 hints...
+        assertExpr(expressions, "names", 1, "names<set#" + itemNames.getGeneratedId() + "><loop-element>");
+        Expression names = find(expressions, "names");
+        assertExpr(expressions, "name.toUpperCase", 2, "name<loop#" + names.getGeneratedId() + ">.toUpperCase");
+        Expression nameToUpperCase = find(expressions, "name.toUpperCase");
+        assertExpr(expressions, "upperCase.length", 2, "upperCase<set#" + nameToUpperCase.getGeneratedId() + ">.length");
+        assertEquals(":3:5", loopLetLoopLet.data("foo", new Foo()).render());
+    }
+
+    public static class Foo {
+
+        public List<Item> getItems() {
+            return Collections.singletonList(new Item());
+        }
+
+    }
+
+    public static class Item {
+
+        public List<String> getNames() {
+            return Arrays.asList("foo", "bzink");
+        }
+
+    }
+
     private void assertParserError(String template, String message, int line) {
         Engine engine = Engine.builder().addDefaultSectionHelpers().build();
         try {
@@ -293,8 +373,7 @@ public class ParserTest {
         } catch (TemplateException expected) {
             assertNotNull(expected.getOrigin());
             assertEquals(line, expected.getOrigin().getLine(), "Wrong line");
-            assertEquals(message,
-                    expected.getMessage());
+            assertEquals(message, expected.getMessage());
         }
     }
 

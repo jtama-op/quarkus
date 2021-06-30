@@ -172,6 +172,13 @@ public class MongoClientConfig {
     public WriteConcernConfig writeConcern;
 
     /**
+     * Configures the read concern.
+     * Supported values are: {@code local|majority|linearizable|snapshot|available}
+     */
+    @ConfigItem
+    public Optional<String> readConcern;
+
+    /**
      * Configures the read preferences.
      * Supported values are: {@code primary|primaryPreferred|secondary|secondaryPreferred|nearest}
      */
@@ -183,4 +190,11 @@ public class MongoClientConfig {
      */
     @ConfigDocSection
     public CredentialConfig credentials;
+
+    /**
+     * The database used during the readiness health checks
+     */
+    @ConfigItem(name = "health.database", defaultValue = "admin")
+    public String healthDatabase;
+
 }

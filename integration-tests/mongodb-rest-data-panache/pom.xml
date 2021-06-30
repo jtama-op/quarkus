@@ -37,8 +37,8 @@
             <scope>test</scope>
         </dependency>
         <dependency>
-            <groupId>de.flapdoodle.embed</groupId>
-            <artifactId>de.flapdoodle.embed.mongo</artifactId>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-test-mongodb</artifactId>
             <scope>test</scope>
         </dependency>
 
@@ -83,12 +83,6 @@
                         </goals>
                     </execution>
                 </executions>
-            </plugin>
-            <plugin>
-                <artifactId>maven-compiler-plugin</artifactId>
-                <configuration>
-                    <parameters>true</parameters>
-                </configuration>
             </plugin>
         </plugins>
     </build>

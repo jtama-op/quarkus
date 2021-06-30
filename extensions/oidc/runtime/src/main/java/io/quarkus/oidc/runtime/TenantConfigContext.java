@@ -5,17 +5,24 @@ import io.quarkus.oidc.OidcTenantConfig;
 class TenantConfigContext {
 
     /**
-     * OIDC Runtime client
+     * OIDC Provider
      */
-    final OidcRuntimeClient client;
+    final OidcProvider provider;
 
     /**
      * Tenant configuration
      */
     final OidcTenantConfig oidcConfig;
 
-    public TenantConfigContext(OidcRuntimeClient client, OidcTenantConfig config) {
-        this.client = client;
+    final boolean ready;
+
+    public TenantConfigContext(OidcProvider client, OidcTenantConfig config) {
+        this(client, config, true);
+    }
+
+    public TenantConfigContext(OidcProvider client, OidcTenantConfig config, boolean ready) {
+        this.provider = client;
         this.oidcConfig = config;
+        this.ready = ready;
     }
 }

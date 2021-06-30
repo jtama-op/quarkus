@@ -16,7 +16,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -50,10 +49,6 @@ public class BeanDeployment {
 
     private static final Logger LOGGER = Logger.getLogger(BeanDeployment.class);
 
-    private static final int ANNOTATION = 0x00002000;
-
-    static final EnumSet<Type.Kind> CLASS_TYPES = EnumSet.of(Type.Kind.CLASS, Type.Kind.PARAMETERIZED_TYPE);
-
     private final BuildContextImpl buildContext;
 
     private final IndexView beanArchiveIndex;
@@ -74,10 +69,12 @@ public class BeanDeployment {
     private final List<BeanInfo> beans;
 
     private final List<InterceptorInfo> interceptors;
+    private final List<DecoratorInfo> decorators;
 
     private final List<ObserverInfo> observers;
 
     final BeanResolverImpl beanResolver;
+    private final AssignabilityCheck assignabilityCheck;
 
     private final InterceptorResolver interceptorResolver;
 
@@ -171,15 +168,17 @@ public class BeanDeployment {
                 builder.additionalStereotypes, annotationStore);
         buildContextPut(Key.STEREOTYPES.asString(), Collections.unmodifiableMap(stereotypes));
 
-        this.transitiveInterceptorBindings = findTransitiveInterceptorBindigs(interceptorBindings.keySet(),
+        this.transitiveInterceptorBindings = findTransitiveInterceptorBindings(interceptorBindings.keySet(),
                 this.beanArchiveIndex,
                 new HashMap<>(), interceptorBindings, annotationStore);
 
         this.injectionPoints = new CopyOnWriteArrayList<>();
         this.interceptors = new CopyOnWriteArrayList<>();
+        this.decorators = new CopyOnWriteArrayList<>();
         this.beans = new CopyOnWriteArrayList<>();
         this.observers = new CopyOnWriteArrayList<>();
 
+        this.assignabilityCheck = new AssignabilityCheck(beanArchiveIndex, applicationIndex);
         this.beanResolver = new BeanResolverImpl(this);
         this.interceptorResolver = new InterceptorResolver(this);
         this.transformUnproxyableClasses = builder.transformUnproxyableClasses;
@@ -231,6 +230,7 @@ public class BeanDeployment {
         buildContextPut(Key.OBSERVERS.asString(), Collections.unmodifiableList(observers));
 
         this.interceptors.addAll(findInterceptors(injectionPoints));
+        this.decorators.addAll(findDecorators(injectionPoints));
         this.injectionPoints.addAll(injectionPoints);
         buildContextPut(Key.INJECTION_POINTS.asString(), Collections.unmodifiableList(this.injectionPoints));
 
@@ -252,6 +252,10 @@ public class BeanDeployment {
         for (InterceptorInfo interceptor : interceptors) {
             interceptor.init(errors, bytecodeTransformerConsumer, transformUnproxyableClasses);
         }
+        for (DecoratorInfo decorator : decorators) {
+            decorator.init(errors, bytecodeTransformerConsumer, transformUnproxyableClasses);
+        }
+
         processErrors(errors);
         List<Predicate<BeanInfo>> allUnusedExclusions = new ArrayList<>(additionalUnusedBeanExclusions);
         if (unusedExclusions != null) {
@@ -298,7 +302,7 @@ public class BeanDeployment {
                 // Instance<Foo>
                 for (InjectionPointInfo injectionPoint : instanceInjectionPoints) {
                     if (Beans.hasQualifiers(bean, injectionPoint.getRequiredQualifiers()) && Beans.matchesType(bean,
-                            injectionPoint.getRequiredType().asParameterizedType().arguments().get(0))) {
+                            injectionPoint.getType().asParameterizedType().arguments().get(0))) {
                         continue test;
                     }
                 }
@@ -389,6 +393,14 @@ public class BeanDeployment {
         return Collections.unmodifiableList(interceptors);
     }
 
+    public Collection<DecoratorInfo> getDecorators() {
+        return Collections.unmodifiableList(decorators);
+    }
+
+    public Collection<StereotypeInfo> getStereotypes() {
+        return Collections.unmodifiableCollection(stereotypes.values());
+    }
+
     /**
      * This index was used to discover components (beans, interceptors, qualifiers, etc.) and during type-safe resolution.
      * 
@@ -411,6 +423,10 @@ public class BeanDeployment {
 
     public BeanResolver getBeanResolver() {
         return beanResolver;
+    }
+
+    public AssignabilityCheck getAssignabilityCheck() {
+        return assignabilityCheck;
     }
 
     boolean hasApplicationIndex() {
@@ -565,7 +581,7 @@ public class BeanDeployment {
         return bindings;
     }
 
-    private static Map<DotName, Set<AnnotationInstance>> findTransitiveInterceptorBindigs(Collection<DotName> initialBindings,
+    private static Map<DotName, Set<AnnotationInstance>> findTransitiveInterceptorBindings(Collection<DotName> initialBindings,
             IndexView index,
             Map<DotName, Set<AnnotationInstance>> result, Map<DotName, ClassInfo> interceptorBindings,
             AnnotationStore annotationStore) {
@@ -709,18 +725,15 @@ public class BeanDeployment {
         Map<MethodInfo, Set<ClassInfo>> syncObserverMethods = new HashMap<>();
         Map<MethodInfo, Set<ClassInfo>> asyncObserverMethods = new HashMap<>();
         // Stereotypes excluding additional BeanDefiningAnnotations
-        List<DotName> realStereotypes = this.stereotypes.entrySet().stream()
-                .filter(e -> !e.getValue().isAdditionalBeanDefiningAnnotation()
-                        && !e.getValue().isAdditionalStereotypeBuildItem())
-                .map(Entry::getKey)
-                .collect(Collectors.toList());
+        Set<DotName> realStereotypes = this.stereotypes.values().stream()
+                .filter(StereotypeInfo::isGenuine)
+                .map(StereotypeInfo::getName)
+                .collect(Collectors.toSet());
 
         for (ClassInfo beanClass : beanArchiveIndex.getKnownClasses()) {
 
             if (Modifier.isInterface(beanClass.flags()) || Modifier.isAbstract(beanClass.flags())
-            // Replace with ClassInfo#isAnnotation() and ClassInfo#isEnum() when using Jandex 2.1.4+
-                    || (beanClass.flags() & ANNOTATION) != 0
-                    || DotNames.ENUM.equals(beanClass.superName())) {
+                    || beanClass.isAnnotation() || beanClass.isEnum()) {
                 // Skip interfaces, abstract classes, annotations and enums
                 continue;
             }
@@ -740,7 +753,7 @@ public class BeanDeployment {
                 int numberOfConstructorsWithInject = 0;
                 for (MethodInfo m : beanClass.methods()) {
                     if (m.name().equals(Methods.INIT)) {
-                        if (m.hasAnnotation(DotNames.INJECT)) {
+                        if (annotationStore.hasAnnotation(m, DotNames.INJECT)) {
                             numberOfConstructorsWithInject++;
                         } else {
                             numberOfConstructorsWithoutInject++;
@@ -784,7 +797,8 @@ public class BeanDeployment {
                 if (annotationStore.getAnnotations(method).isEmpty()) {
                     continue;
                 }
-                if (annotationStore.hasAnnotation(method, DotNames.PRODUCES)) {
+                if (annotationStore.hasAnnotation(method, DotNames.PRODUCES)
+                        && !annotationStore.hasAnnotation(method, DotNames.VETOED_PRODUCER)) {
                     // Producers are not inherited
                     producerMethods.add(method);
                     if (!hasBeanDefiningAnnotation) {
@@ -854,7 +868,8 @@ public class BeanDeployment {
                         : null;
             }
             for (FieldInfo field : beanClass.fields()) {
-                if (annotationStore.hasAnnotation(field, DotNames.PRODUCES)) {
+                if (annotationStore.hasAnnotation(field, DotNames.PRODUCES)
+                        && !annotationStore.hasAnnotation(field, DotNames.VETOED_PRODUCER)) {
                     if (annotationStore.hasAnnotation(field, DotNames.INJECT)) {
                         throw new DefinitionException("Injected field cannot be annotated with @Produces: " + field);
                     }
@@ -1000,7 +1015,7 @@ public class BeanDeployment {
                         hasQualifier = false;
                     }
                 }
-                if (hasQualifier && beanResolver.matches(beanType, disposer.getDisposedParameterType())) {
+                if (hasQualifier && beanResolver.matches(disposer.getDisposedParameterType(), beanType)) {
                     found.add(disposer);
                 }
             }
@@ -1117,6 +1132,33 @@ public class BeanDeployment {
             injectionPoints.addAll(interceptor.getAllInjectionPoints());
         }
         return interceptors;
+    }
+
+    private List<DecoratorInfo> findDecorators(List<InjectionPointInfo> injectionPoints) {
+        Map<DotName, ClassInfo> decoratorClasses = new HashMap<>();
+        for (AnnotationInstance annotation : beanArchiveIndex.getAnnotations(DotNames.DECORATOR)) {
+            if (Kind.CLASS.equals(annotation.target().kind())) {
+                decoratorClasses.put(annotation.target().asClass().name(), annotation.target().asClass());
+            }
+        }
+        List<DecoratorInfo> decorators = new ArrayList<>();
+        for (ClassInfo decoratorClass : decoratorClasses.values()) {
+            if (annotationStore.hasAnnotation(decoratorClass, DotNames.VETOED) || isExcluded(decoratorClass)) {
+                // Skip vetoed decorators
+                continue;
+            }
+            decorators
+                    .add(Decorators.createDecorator(decoratorClass, this, injectionPointTransformer, annotationStore));
+        }
+        if (LOGGER.isTraceEnabled()) {
+            for (DecoratorInfo decorator : decorators) {
+                LOGGER.logf(Level.TRACE, "Created %s", decorator);
+            }
+        }
+        for (DecoratorInfo decorator : decorators) {
+            injectionPoints.addAll(decorator.getAllInjectionPoints());
+        }
+        return decorators;
     }
 
     private void validateBeans(List<Throwable> errors, List<BeanDeploymentValidator> validators,

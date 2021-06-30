@@ -16,6 +16,7 @@ import io.quarkus.builder.BuildChainBuilder;
 import io.quarkus.builder.BuildContext;
 import io.quarkus.builder.BuildStep;
 import io.quarkus.test.QuarkusUnitTest;
+import io.quarkus.vertx.http.deployment.NonApplicationRootPathBuildItem;
 import io.quarkus.vertx.http.deployment.RouteBuildItem;
 import io.restassured.RestAssured;
 import io.vertx.core.Handler;
@@ -39,14 +40,15 @@ public class NonApplicationAndRootPathTest {
                 builder.addBuildStep(new BuildStep() {
                     @Override
                     public void execute(BuildContext context) {
-                        context.produce(new RouteBuildItem.Builder()
-                                .route("/non-app")
+                        NonApplicationRootPathBuildItem buildItem = context.consume(NonApplicationRootPathBuildItem.class);
+                        context.produce(buildItem.routeBuilder()
+                                .route("non-app-relative")
                                 .handler(new MyHandler())
                                 .blockingRoute()
-                                .nonApplicationRoute()
                                 .build());
                     }
                 }).produces(RouteBuildItem.class)
+                        .consumes(NonApplicationRootPathBuildItem.class)
                         .build();
             }
         };
@@ -62,15 +64,9 @@ public class NonApplicationAndRootPathTest {
     }
 
     @Test
-    public void testNonApplicationEndpointOnRootPathWithRedirect() {
-        // Note RestAssured knows the path prefix is /api
-        RestAssured.given().get("/non-app").then().statusCode(200).body(Matchers.equalTo("/api/q/non-app"));
-    }
-
-    @Test
     public void testNonApplicationEndpointDirect() {
         // Note RestAssured knows the path prefix is /api
-        RestAssured.given().get("/q/non-app").then().statusCode(200).body(Matchers.equalTo("/api/q/non-app"));
+        RestAssured.given().get("/q/non-app-relative").then().statusCode(200).body(Matchers.equalTo("/api/q/non-app-relative"));
     }
 
     @Singleton

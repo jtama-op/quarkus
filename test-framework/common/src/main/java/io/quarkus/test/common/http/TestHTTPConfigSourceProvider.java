@@ -4,6 +4,7 @@ import java.io.Serializable;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 
 import org.eclipse.microprofile.config.spi.ConfigSource;
 import org.eclipse.microprofile.config.spi.ConfigSourceProvider;
@@ -25,6 +26,8 @@ public class TestHTTPConfigSourceProvider implements ConfigSourceProvider {
         Map<String, String> map = new HashMap<>();
         map.put(TEST_URL_KEY, sanitizeURL(TEST_URL_VALUE));
         map.put(TEST_URL_SSL_KEY, sanitizeURL(TEST_URL_SSL_VALUE));
+        map.put("%dev." + TEST_URL_KEY, sanitizeURL(
+                "http://${quarkus.http.host:localhost}:${quarkus.http.test-port:8080}${quarkus.servlet.context-path:}"));
         entries = Collections.unmodifiableMap(map);
     }
 
@@ -41,6 +44,10 @@ public class TestHTTPConfigSourceProvider implements ConfigSourceProvider {
 
         public Map<String, String> getProperties() {
             return entries;
+        }
+
+        public Set<String> getPropertyNames() {
+            return entries.keySet();
         }
 
         public String getValue(final String propertyName) {

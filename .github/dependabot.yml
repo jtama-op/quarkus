@@ -6,7 +6,7 @@ updates:
       interval: daily
       time: "23:00"
       timezone: Europe/Paris
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 4
     labels:
       - area/dependencies
     allow:
@@ -23,6 +23,10 @@ updates:
       - dependency-name: org.eclipse:yasson
       - dependency-name: org.yaml:snakeyaml
       - dependency-name: com.google.guava:guava
+      - dependency-name: com.vackosar.gitflowincrementalbuilder:gitflow-incremental-builder
+      - dependency-name: com.jcraft:jzlib
+      - dependency-name: org.jboss.logging:*
+      - dependency-name: org.jboss.logmanager:*
       # Quarkus
       - dependency-name: io.quarkus.gizmo:gizmo
       - dependency-name: io.quarkus.http:*
@@ -33,12 +37,11 @@ updates:
       - dependency-name: org.postgresql:postgresql
       - dependency-name: org.mariadb.jdbc:mariadb-java-client
       - dependency-name: mysql:mysql-connector-java
-      - dependency-name: org.apache.derby:derbyclient
+      - dependency-name: org.apache.derby:*
+      - dependency-name: com.ibm.db2:jcc
       # Kafka
       - dependency-name: org.apache.kafka:*
       - dependency-name: org.apache.zookeeper:zookeeper
-      # Debezium
-      - dependency-name: io.debezium:debezium-core
       # Scala
       - dependency-name: org.scala-lang:*
       - dependency-name: net.alchim31.maven:scala-maven-plugin
@@ -50,7 +53,7 @@ updates:
       - dependency-name: io.smallrye:smallrye-opentracing
       - dependency-name: io.smallrye:smallrye-fault-tolerance
       - dependency-name: io.smallrye:smallrye-context-propagation
-      - dependency-name: io.smallrye.common:smallrye-common-bom
+      - dependency-name: io.smallrye.common:*
       - dependency-name: io.smallrye.config:smallrye-config
       - dependency-name: io.smallrye.reactive:mutiny
       - dependency-name: io.smallrye.reactive:smallrye-reactive-messaging
@@ -69,6 +72,7 @@ updates:
       - dependency-name: org.mockito:*
       - dependency-name: org.awaitility:awaitility
       - dependency-name: com.thoughtworks.xstream:xstream
+      - dependency-name: org.jacoco:*
       # Maven plugins
       - dependency-name: net.revelc.code.formatter:formatter-maven-plugin
       - dependency-name: net.revelc.code:impsort-maven-plugin
@@ -92,13 +96,18 @@ updates:
       - dependency-name: com.github.ben-manes.caffeine:caffeine
       # Jackson
       - dependency-name: com.fasterxml.jackson:jackson-bom
+      - dependency-name: com.fasterxml:classmate
       # AWS
       - dependency-name: software.amazon.awssdk:*
       - dependency-name: com.amazon.alexa:*
-      - dependency-name: com.amazonaws:aws-lambda-java-events
+      - dependency-name: com.amazonaws:*
+      - dependency-name: com.amazonaws.serverless:*
+      # Azure
+      - dependency-name: com.microsoft.azure.functions:*
       # Apache Commons
       - dependency-name: commons-io:commons-io
       - dependency-name: org.apache.commons:commons-lang3
+      - dependency-name: commons-codec:commons-codec
       # Micrometer
       - dependency-name: io.micrometer:micrometer-bom
       # BouncyCastle
@@ -106,6 +115,12 @@ updates:
       # Logstash
       - dependency-name: biz.paluch.logging:logstash-gelf
       - dependency-name: io.sentry:*
+      # MongoDB
+      - dependency-name: org.mongodb:*
+      # Avro
+      - dependency-name: org.apache.avro:*
+      # gRPC
+      - dependency-name: io.grpc:*
     rebase-strategy: disabled
   - package-ecosystem: gradle
     directory: "/integration-tests/gradle"
@@ -113,7 +128,7 @@ updates:
       interval: daily
       time: "21:00"
       timezone: Europe/Paris
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 4
     labels:
       - area/dependencies
     rebase-strategy: disabled
@@ -123,7 +138,7 @@ updates:
       interval: daily
       time: "21:00"
       timezone: Europe/Paris
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 4
     labels:
       - area/dependencies
     rebase-strategy: disabled

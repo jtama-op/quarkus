@@ -1,11 +1,50 @@
 package org.jboss.resteasy.reactive.server.model;
 
+import java.util.Collections;
 import java.util.List;
+import java.util.function.Supplier;
+import org.jboss.resteasy.reactive.common.model.ResourceClass;
+import org.jboss.resteasy.reactive.server.spi.EndpointInvoker;
 import org.jboss.resteasy.reactive.server.spi.ServerRestHandler;
 
 public interface HandlerChainCustomizer {
 
-    List<ServerRestHandler> handlers(Phase phase);
+    /**
+     *
+     * @param phase The phase
+     * @param serverResourceMethod The method, will be null if this has not been matched yet
+     * @return
+     */
+    default List<ServerRestHandler> handlers(Phase phase, ResourceClass resourceClass, ServerResourceMethod resourceMethod) {
+        return handlers(phase);
+    }
+
+    @Deprecated
+    default List<ServerRestHandler> handlers(Phase phase) {
+        return Collections.emptyList();
+    }
+
+    /**
+     * Returns an alternate invocation handler for this method.
+     *
+     * This is only considered for method level customizers
+     * 
+     * @param invoker
+     */
+    default ServerRestHandler alternateInvocationHandler(EndpointInvoker invoker) {
+        return null;
+    }
+
+    /**
+     * Returns an alternate endpoint invoker for this method.
+     *
+     * This is only considered for method level customizers
+     * 
+     * @param method
+     */
+    default Supplier<EndpointInvoker> alternateInvoker(ServerResourceMethod method) {
+        return null;
+    }
 
     enum Phase {
         /**
@@ -35,6 +74,10 @@ public interface HandlerChainCustomizer {
          * handlers are invoked just after the resource method is invoked
          */
         AFTER_METHOD_INVOKE,
+        /**
+         * handlers are invoked just after the resource method result has been turned into a {@link javax.ws.rs.core.Response}
+         */
+        AFTER_RESPONSE_CREATED,
 
     }
 }

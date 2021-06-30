@@ -44,13 +44,13 @@ import io.quarkus.deployment.annotations.ExecutionTime;
 import io.quarkus.deployment.annotations.Record;
 import io.quarkus.deployment.builditem.AdditionalIndexedClassesBuildItem;
 import io.quarkus.deployment.builditem.ApplicationArchivesBuildItem;
-import io.quarkus.deployment.builditem.CapabilityBuildItem;
 import io.quarkus.deployment.builditem.CombinedIndexBuildItem;
 import io.quarkus.deployment.builditem.FeatureBuildItem;
 import io.quarkus.deployment.builditem.GeneratedResourceBuildItem;
 import io.quarkus.deployment.builditem.HotDeploymentWatchedFileBuildItem;
 import io.quarkus.deployment.builditem.LaunchModeBuildItem;
 import io.quarkus.deployment.builditem.ShutdownContextBuildItem;
+import io.quarkus.deployment.builditem.SystemPropertyBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.NativeImageResourceBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.ReflectiveClassBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.ReflectiveHierarchyBuildItem;
@@ -61,6 +61,7 @@ import io.quarkus.resteasy.server.common.spi.AllowedJaxRsAnnotationPrefixBuildIt
 import io.quarkus.resteasy.server.common.spi.ResteasyJaxrsConfigBuildItem;
 import io.quarkus.runtime.LaunchMode;
 import io.quarkus.smallrye.openapi.common.deployment.SmallRyeOpenApiConfig;
+import io.quarkus.smallrye.openapi.deployment.security.SecurityConfigFilter;
 import io.quarkus.smallrye.openapi.deployment.spi.AddToOpenAPIDefinitionBuildItem;
 import io.quarkus.smallrye.openapi.runtime.OpenApiConstants;
 import io.quarkus.smallrye.openapi.runtime.OpenApiDocumentService;
@@ -121,8 +122,55 @@ public class SmallRyeOpenApiProcessor {
     }
 
     @BuildStep
-    CapabilityBuildItem capability() {
-        return new CapabilityBuildItem(Capability.SMALLRYE_OPENAPI);
+    void mapConfig(SmallRyeOpenApiConfig openApiConfig,
+            BuildProducer<SystemPropertyBuildItem> systemProperties) {
+
+        if (openApiConfig.openApiVersion.isPresent()) {
+            systemProperties.produce(new SystemPropertyBuildItem(
+                    io.smallrye.openapi.api.constants.OpenApiConstants.OPEN_API_VERSION, openApiConfig.openApiVersion.get()));
+        }
+        if (openApiConfig.infoTitle.isPresent()) {
+            systemProperties.produce(new SystemPropertyBuildItem(io.smallrye.openapi.api.constants.OpenApiConstants.INFO_TITLE,
+                    openApiConfig.infoTitle.get()));
+        }
+        if (openApiConfig.infoVersion.isPresent()) {
+            systemProperties.produce(new SystemPropertyBuildItem(
+                    io.smallrye.openapi.api.constants.OpenApiConstants.INFO_VERSION, openApiConfig.infoVersion.get()));
+        }
+        if (openApiConfig.infoDescription.isPresent()) {
+            systemProperties.produce(new SystemPropertyBuildItem(
+                    io.smallrye.openapi.api.constants.OpenApiConstants.INFO_DESCRIPTION, openApiConfig.infoDescription.get()));
+        }
+        if (openApiConfig.infoTermsOfService.isPresent()) {
+            systemProperties.produce(new SystemPropertyBuildItem(io.smallrye.openapi.api.constants.OpenApiConstants.INFO_TERMS,
+                    openApiConfig.infoTermsOfService.get()));
+        }
+        if (openApiConfig.infoContactEmail.isPresent()) {
+            systemProperties
+                    .produce(new SystemPropertyBuildItem(io.smallrye.openapi.api.constants.OpenApiConstants.INFO_CONTACT_EMAIL,
+                            openApiConfig.infoContactEmail.get()));
+        }
+        if (openApiConfig.infoContactName.isPresent()) {
+            systemProperties.produce(new SystemPropertyBuildItem(
+                    io.smallrye.openapi.api.constants.OpenApiConstants.INFO_CONTACT_NAME, openApiConfig.infoContactName.get()));
+        }
+        if (openApiConfig.infoContactUrl.isPresent()) {
+            systemProperties.produce(new SystemPropertyBuildItem(
+                    io.smallrye.openapi.api.constants.OpenApiConstants.INFO_CONTACT_URL, openApiConfig.infoContactUrl.get()));
+        }
+        if (openApiConfig.infoLicenseName.isPresent()) {
+            systemProperties.produce(new SystemPropertyBuildItem(
+                    io.smallrye.openapi.api.constants.OpenApiConstants.INFO_LICENSE_NAME, openApiConfig.infoLicenseName.get()));
+        }
+        if (openApiConfig.infoLicenseUrl.isPresent()) {
+            systemProperties.produce(new SystemPropertyBuildItem(
+                    io.smallrye.openapi.api.constants.OpenApiConstants.INFO_LICENSE_URL, openApiConfig.infoLicenseUrl.get()));
+        }
+        if (openApiConfig.operationIdStrategy.isPresent()) {
+            systemProperties.produce(
+                    new SystemPropertyBuildItem(io.smallrye.openapi.api.constants.OpenApiConstants.OPERATION_ID_STRAGEGY,
+                            openApiConfig.operationIdStrategy.get().name()));
+        }
     }
 
     @BuildStep
@@ -167,17 +215,30 @@ public class SmallRyeOpenApiProcessor {
          */
         if (launch.getLaunchMode() == LaunchMode.DEVELOPMENT) {
             recorder.setupClDevMode(shutdownContext);
-            displayableEndpoints.produce(new NotFoundPageDisplayableEndpointBuildItem(
-                    nonApplicationRootPathBuildItem.adjustPath(openApiConfig.path), "Open API Schema document"));
         }
 
         Handler<RoutingContext> handler = recorder.handler(openApiRuntimeConfig);
-        return new RouteBuildItem.Builder()
+        return nonApplicationRootPathBuildItem.routeBuilder()
                 .route(openApiConfig.path)
+                .routeConfigKey("quarkus.smallrye-openapi.path")
                 .handler(handler)
+                .displayOnNotFoundPage("Open API Schema document")
                 .blockingRoute()
-                .nonApplicationRoute()
                 .build();
+    }
+
+    @BuildStep
+    void addSecurityFilter(BuildProducer<AddToOpenAPIDefinitionBuildItem> addToOpenAPIDefinitionProducer,
+            SmallRyeOpenApiConfig config) {
+
+        addToOpenAPIDefinitionProducer
+                .produce(new AddToOpenAPIDefinitionBuildItem(new SecurityConfigFilter(config)));
+    }
+
+    @BuildStep
+    @Record(ExecutionTime.STATIC_INIT)
+    void classLoaderHack(OpenApiRecorder recorder) {
+        recorder.classLoaderHack();
     }
 
     @BuildStep
@@ -307,16 +368,18 @@ public class SmallRyeOpenApiProcessor {
             annotationModel = new OpenAPIImpl();
         }
         OpenApiDocument finalDocument = loadDocument(staticModel, annotationModel, openAPIBuildItems);
-        boolean shouldStore = openApiConfig.storeSchemaDirectory.isPresent();
+
         for (Format format : Format.values()) {
             String name = OpenApiConstants.BASE_NAME + format;
             byte[] schemaDocument = OpenApiSerializer.serialize(finalDocument.get(), format).getBytes(StandardCharsets.UTF_8);
             resourceBuildItemBuildProducer.produce(new GeneratedResourceBuildItem(name, schemaDocument));
             nativeImageResources.produce(new NativeImageResourceBuildItem(name));
+        }
 
-            if (shouldStore) {
-                storeGeneratedSchema(openApiConfig, out, schemaDocument, format);
-            }
+        // Store the document if needed
+        boolean shouldStore = openApiConfig.storeSchemaDirectory.isPresent();
+        if (shouldStore) {
+            storeDocument(out, openApiConfig, staticModel, annotationModel, openAPIBuildItems);
         }
     }
 
@@ -486,6 +549,36 @@ public class SmallRyeOpenApiProcessor {
 
     private OpenApiDocument loadDocument(OpenAPI staticModel, OpenAPI annotationModel,
             List<AddToOpenAPIDefinitionBuildItem> openAPIBuildItems) {
+        OpenApiDocument document = prepareOpenApiDocument(staticModel, annotationModel, openAPIBuildItems);
+        document.initialize();
+        return document;
+    }
+
+    private void storeDocument(OutputTargetBuildItem out,
+            SmallRyeOpenApiConfig smallRyeOpenApiConfig,
+            OpenAPI staticModel,
+            OpenAPI annotationModel,
+            List<AddToOpenAPIDefinitionBuildItem> openAPIBuildItems) throws IOException {
+
+        Config config = ConfigProvider.getConfig();
+        OpenApiConfig openApiConfig = new OpenApiConfigImpl(config);
+
+        OpenApiDocument document = prepareOpenApiDocument(staticModel, annotationModel, openAPIBuildItems);
+
+        document.filter(filter(openApiConfig)); // This usually happens at runtime, so when storing we want to filter here too.
+        document.initialize();
+
+        for (Format format : Format.values()) {
+            String name = OpenApiConstants.BASE_NAME + format;
+            byte[] schemaDocument = OpenApiSerializer.serialize(document.get(), format).getBytes(StandardCharsets.UTF_8);
+            storeGeneratedSchema(smallRyeOpenApiConfig, out, schemaDocument, format);
+        }
+
+    }
+
+    private OpenApiDocument prepareOpenApiDocument(OpenAPI staticModel,
+            OpenAPI annotationModel,
+            List<AddToOpenAPIDefinitionBuildItem> openAPIBuildItems) {
         Config config = ConfigProvider.getConfig();
         OpenApiConfig openApiConfig = new OpenApiConfigImpl(config);
 
@@ -502,7 +595,6 @@ public class SmallRyeOpenApiProcessor {
             OASFilter otherExtensionFilter = openAPIBuildItem.getOASFilter();
             document.filter(otherExtensionFilter);
         }
-        document.initialize();
         return document;
     }
 
@@ -511,5 +603,10 @@ public class SmallRyeOpenApiProcessor {
         document.reset();
         document.config(openApiConfig);
         return document;
+    }
+
+    private OASFilter filter(OpenApiConfig openApiConfig) {
+        return OpenApiProcessor.getFilter(openApiConfig,
+                Thread.currentThread().getContextClassLoader());
     }
 }

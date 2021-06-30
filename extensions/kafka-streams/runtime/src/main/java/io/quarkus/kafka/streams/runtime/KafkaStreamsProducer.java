@@ -5,8 +5,10 @@ import static io.quarkus.kafka.streams.runtime.KafkaStreamsRuntimeConfig.DEFAULT
 import java.net.InetSocketAddress;
 import java.time.Duration;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Properties;
@@ -45,6 +47,7 @@ import io.quarkus.arc.Arc;
 import io.quarkus.arc.Unremovable;
 import io.quarkus.runtime.ShutdownEvent;
 import io.quarkus.runtime.Startup;
+import io.smallrye.common.annotation.Identifier;
 
 /**
  * Manages the lifecycle of a Kafka Streams pipeline. If there's a producer
@@ -64,14 +67,17 @@ public class KafkaStreamsProducer {
     private final KafkaStreamsTopologyManager kafkaStreamsTopologyManager;
     private final Admin kafkaAdminClient;
 
+    // TODO Replace @Named with @Identifier when it will be integrated
+
     @Inject
     public KafkaStreamsProducer(KafkaStreamsSupport kafkaStreamsSupport, KafkaStreamsRuntimeConfig runtimeConfig,
             Instance<Topology> topology, Instance<KafkaClientSupplier> kafkaClientSupplier,
+            @Identifier("default-kafka-broker") Instance<Map<String, Object>> defaultConfiguration,
             Instance<StateListener> stateListener, Instance<StateRestoreListener> globalStateRestoreListener) {
         shutdown = false;
         // No producer for Topology -> nothing to do
         if (topology.isUnsatisfied()) {
-            LOGGER.debug("No Topology producer; Kafka Streams will not be started");
+            LOGGER.warn("No Topology producer; Kafka Streams will not be started");
             this.executorService = null;
             this.kafkaStreams = null;
             this.kafkaStreamsTopologyManager = null;
@@ -87,7 +93,12 @@ public class KafkaStreamsProducer {
             bootstrapServersConfig = ConfigProvider.getConfig().getOptionalValue("kafka.bootstrap.servers", String.class)
                     .orElse(bootstrapServersConfig);
         }
-        Properties kafkaStreamsProperties = getStreamsProperties(buildTimeProperties, bootstrapServersConfig, runtimeConfig);
+        Map<String, Object> cfg = Collections.emptyMap();
+        if (!defaultConfiguration.isUnsatisfied()) {
+            cfg = defaultConfiguration.get();
+        }
+        Properties kafkaStreamsProperties = getStreamsProperties(buildTimeProperties, cfg, bootstrapServersConfig,
+                runtimeConfig);
         this.kafkaAdminClient = Admin.create(getAdminClientConfig(kafkaStreamsProperties));
 
         this.executorService = Executors.newSingleThreadExecutor();
@@ -176,12 +187,16 @@ public class KafkaStreamsProducer {
     /**
      * Returns all properties to be passed to Kafka Streams.
      */
-    private static Properties getStreamsProperties(Properties properties, String bootstrapServersConfig,
+    private static Properties getStreamsProperties(Properties properties,
+            Map<String, Object> cfg, String bootstrapServersConfig,
             KafkaStreamsRuntimeConfig runtimeConfig) {
         Properties streamsProperties = new Properties();
 
         // build-time options
         streamsProperties.putAll(properties);
+
+        // default configuration
+        streamsProperties.putAll(cfg);
 
         // dynamic add -- back-compatibility
         streamsProperties.putAll(KafkaStreamsPropertiesUtil.quarkusKafkaStreamsProperties());

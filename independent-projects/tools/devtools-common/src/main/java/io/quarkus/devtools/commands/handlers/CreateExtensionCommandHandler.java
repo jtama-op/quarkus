@@ -44,7 +44,7 @@ public class CreateExtensionCommandHandler {
             throws QuarkusCommandException {
         try {
             final QuarkusExtensionCodestartCatalog catalog = QuarkusExtensionCodestartCatalog
-                    .fromBundledResources();
+                    .fromBaseCodestartsResources();
             catalog.createProject(input).generate(newExtensionDir);
 
             final String extensionDirName = newExtensionDir.getFileName().toString();
@@ -73,7 +73,7 @@ public class CreateExtensionCommandHandler {
 
             return QuarkusCommandOutcome.success();
         } catch (IOException e) {
-            throw new QuarkusCommandException("Error while creating Quarkus extension", e);
+            throw new QuarkusCommandException("Error while creating Quarkus extension: " + e.getMessage(), e);
         }
     }
 
@@ -92,7 +92,7 @@ public class CreateExtensionCommandHandler {
         final Path itTestPom = checkPomExists(itTestDir);
         new PomTransformer(itTestPom, StandardCharsets.UTF_8)
                 .transform(PomTransformer.Transformation.addModule(extensionDirName));
-        FileUtils.moveDirectory(newExtensionDir.resolve("integration-test").toFile(),
+        FileUtils.moveDirectory(newExtensionDir.resolve("integration-tests").toFile(),
                 itTestDir.resolve(extensionDirName).toFile());
     }
 

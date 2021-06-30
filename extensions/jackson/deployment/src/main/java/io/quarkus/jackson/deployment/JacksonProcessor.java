@@ -18,6 +18,7 @@ import org.jboss.jandex.DotName;
 import org.jboss.jandex.IndexView;
 import org.jboss.jandex.Type;
 
+import com.fasterxml.jackson.annotation.SimpleObjectIdResolver;
 import com.fasterxml.jackson.databind.JsonDeserializer;
 import com.fasterxml.jackson.databind.JsonSerializer;
 import com.fasterxml.jackson.databind.Module;
@@ -30,12 +31,13 @@ import io.quarkus.arc.deployment.AdditionalBeanBuildItem;
 import io.quarkus.arc.deployment.GeneratedBeanBuildItem;
 import io.quarkus.arc.deployment.GeneratedBeanGizmoAdaptor;
 import io.quarkus.arc.deployment.SyntheticBeanBuildItem;
+import io.quarkus.arc.deployment.UnremovableBeanBuildItem;
+import io.quarkus.deployment.Capabilities;
 import io.quarkus.deployment.Capability;
 import io.quarkus.deployment.annotations.BuildProducer;
 import io.quarkus.deployment.annotations.BuildStep;
 import io.quarkus.deployment.annotations.ExecutionTime;
 import io.quarkus.deployment.annotations.Record;
-import io.quarkus.deployment.builditem.CapabilityBuildItem;
 import io.quarkus.deployment.builditem.CombinedIndexBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.ReflectiveClassBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.ReflectiveHierarchyBuildItem;
@@ -56,13 +58,21 @@ import io.quarkus.jackson.spi.JacksonModuleBuildItem;
 public class JacksonProcessor {
 
     private static final DotName JSON_DESERIALIZE = DotName.createSimple(JsonDeserialize.class.getName());
+
     private static final DotName JSON_SERIALIZE = DotName.createSimple(JsonSerialize.class.getName());
+
     private static final DotName JSON_CREATOR = DotName.createSimple("com.fasterxml.jackson.annotation.JsonCreator");
+
     private static final DotName JSON_NAMING = DotName.createSimple("com.fasterxml.jackson.databind.annotation.JsonNaming");
+
+    private static final DotName JSON_IDENTITY_INFO = DotName.createSimple("com.fasterxml.jackson.annotation.JsonIdentityInfo");
+
     private static final DotName BUILDER_VOID = DotName.createSimple(Void.class.getName());
 
     private static final String TIME_MODULE = "com.fasterxml.jackson.datatype.jsr310.JavaTimeModule";
+
     private static final String JDK8_MODULE = "com.fasterxml.jackson.datatype.jdk8.Jdk8Module";
+
     private static final String PARAMETER_NAMES_MODULE = "com.fasterxml.jackson.module.paramnames.ParameterNamesModule";
 
     // this list can probably be enriched with more modules
@@ -76,7 +86,14 @@ public class JacksonProcessor {
     List<IgnoreJsonDeserializeClassBuildItem> ignoreJsonDeserializeClassBuildItems;
 
     @BuildStep
-    CapabilityBuildItem register(
+    void unremovable(Capabilities capabilities, BuildProducer<UnremovableBeanBuildItem> producer) {
+        if (capabilities.isPresent(Capability.VERTX_CORE)) {
+            producer.produce(UnremovableBeanBuildItem.beanTypes(ObjectMapper.class));
+        }
+    }
+
+    @BuildStep
+    void register(
             BuildProducer<ReflectiveClassBuildItem> reflectiveClass,
             BuildProducer<ReflectiveHierarchyBuildItem> reflectiveHierarchyClass,
             BuildProducer<ReflectiveMethodBuildItem> reflectiveMethod,
@@ -84,7 +101,8 @@ public class JacksonProcessor {
         reflectiveClass.produce(
                 new ReflectiveClassBuildItem(true, false, "com.fasterxml.jackson.module.jaxb.JaxbAnnotationIntrospector",
                         "com.fasterxml.jackson.databind.ser.std.SqlDateSerializer",
-                        "com.fasterxml.jackson.databind.ser.std.SqlTimeSerializer"));
+                        "com.fasterxml.jackson.databind.ser.std.SqlTimeSerializer",
+                        "com.fasterxml.jackson.annotation.SimpleObjectIdResolver"));
 
         IndexView index = combinedIndexBuildItem.getIndex();
 
@@ -117,6 +135,17 @@ public class JacksonProcessor {
                 // the Deserializers are constructed internally by Jackson using a no-args constructor
                 reflectiveClass.produce(new ReflectiveClassBuildItem(false, false, usingValue.asClass().name().toString()));
             }
+            AnnotationValue keyUsingValue = deserializeInstance.value("keyUsing");
+            if (keyUsingValue != null) {
+                // the Deserializers are constructed internally by Jackson using a no-args constructor
+                reflectiveClass.produce(new ReflectiveClassBuildItem(false, false, keyUsingValue.asClass().name().toString()));
+            }
+            AnnotationValue contentUsingValue = deserializeInstance.value("contentUsing");
+            if (contentUsingValue != null) {
+                // the Deserializers are constructed internally by Jackson using a no-args constructor
+                reflectiveClass
+                        .produce(new ReflectiveClassBuildItem(false, false, contentUsingValue.asClass().name().toString()));
+            }
         }
 
         // handle the various @JsonSerialize cases
@@ -125,6 +154,23 @@ public class JacksonProcessor {
             if (usingValue != null) {
                 // the Serializers are constructed internally by Jackson using a no-args constructor
                 reflectiveClass.produce(new ReflectiveClassBuildItem(false, false, usingValue.asClass().name().toString()));
+            }
+            AnnotationValue keyUsingValue = serializeInstance.value("keyUsing");
+            if (keyUsingValue != null) {
+                // the Deserializers are constructed internally by Jackson using a no-args constructor
+                reflectiveClass.produce(new ReflectiveClassBuildItem(false, false, keyUsingValue.asClass().name().toString()));
+            }
+            AnnotationValue contentUsingValue = serializeInstance.value("contentUsing");
+            if (contentUsingValue != null) {
+                // the Deserializers are constructed internally by Jackson using a no-args constructor
+                reflectiveClass
+                        .produce(new ReflectiveClassBuildItem(false, false, contentUsingValue.asClass().name().toString()));
+            }
+            AnnotationValue nullsUsingValue = serializeInstance.value("nullsUsing");
+            if (nullsUsingValue != null) {
+                // the Deserializers are constructed internally by Jackson using a no-args constructor
+                reflectiveClass
+                        .produce(new ReflectiveClassBuildItem(false, false, nullsUsingValue.asClass().name().toString()));
             }
         }
 
@@ -143,10 +189,23 @@ public class JacksonProcessor {
             }
         }
 
+        // register @JsonIdentityInfo strategy implementations for reflection
+        for (AnnotationInstance jsonIdentityInfoInstance : index.getAnnotations(JSON_IDENTITY_INFO)) {
+            AnnotationValue generatorValue = jsonIdentityInfoInstance.value("generator");
+            AnnotationValue resolverValue = jsonIdentityInfoInstance.value("resolver");
+            if (generatorValue != null) {
+                reflectiveClass.produce(new ReflectiveClassBuildItem(true, true, generatorValue.asClass().name().toString()));
+            }
+            if (resolverValue != null) {
+                reflectiveClass.produce(new ReflectiveClassBuildItem(true, true, resolverValue.asClass().name().toString()));
+            } else {
+                // Registering since SimpleObjectIdResolver is the default value of @JsonIdentityInfo.resolver
+                reflectiveClass.produce(new ReflectiveClassBuildItem(true, true, SimpleObjectIdResolver.class));
+            }
+        }
+
         // this needs to be registered manually since the runtime module is not indexed by Jandex
         additionalBeans.produce(new AdditionalBeanBuildItem(ObjectMapperProducer.class));
-
-        return new CapabilityBuildItem(Capability.JACKSON);
     }
 
     private void addReflectiveHierarchyClass(DotName className,
@@ -263,7 +322,7 @@ public class JacksonProcessor {
 
             // ensure that the things we auto-register have the lower priority - this ensures that user registered modules take priority
             try (MethodCreator priority = classCreator.getMethodCreator("priority", int.class)) {
-                priority.returnValue(priority.load(ObjectMapperCustomizer.MINIMUM_PRIORITY));
+                priority.returnValue(priority.load(ObjectMapperCustomizer.QUARKUS_CUSTOMIZER_PRIORITY));
             }
         }
     }

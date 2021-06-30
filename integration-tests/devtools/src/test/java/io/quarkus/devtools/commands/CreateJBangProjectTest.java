@@ -11,9 +11,11 @@ import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 
-import io.quarkus.devtools.PlatformAwareTestBase;
 import io.quarkus.devtools.commands.data.QuarkusCommandException;
 import io.quarkus.devtools.commands.data.QuarkusCommandOutcome;
+import io.quarkus.devtools.project.BuildTool;
+import io.quarkus.devtools.project.QuarkusProjectHelper;
+import io.quarkus.devtools.testing.PlatformAwareTestBase;
 import io.quarkus.devtools.testing.SnapshotTesting;
 
 public class CreateJBangProjectTest extends PlatformAwareTestBase {
@@ -27,7 +29,7 @@ public class CreateJBangProjectTest extends PlatformAwareTestBase {
 
         assertThat(projectDir.resolve("jbang")).exists();
 
-        assertThat(projectDir.resolve("src/GreetingResource.java"))
+        assertThat(projectDir.resolve("src/main.java"))
                 .exists()
                 .satisfies(checkContains("//usr/bin/env jbang \"$0\" \"$@\" ; exit $?"))
                 .satisfies(checkContains("//DEPS io.quarkus:quarkus-resteasy"));
@@ -43,7 +45,7 @@ public class CreateJBangProjectTest extends PlatformAwareTestBase {
 
         assertThat(projectDir.resolve("jbang")).doesNotExist();
 
-        assertThat(projectDir.resolve("src/GreetingResource.java"))
+        assertThat(projectDir.resolve("src/main.java"))
                 .exists()
                 .satisfies(checkContains("//usr/bin/env jbang \"$0\" \"$@\" ; exit $?"))
                 .satisfies(checkContains("//DEPS io.quarkus:quarkus-resteasy"));
@@ -63,7 +65,7 @@ public class CreateJBangProjectTest extends PlatformAwareTestBase {
 
         assertThat(projectDir.resolve("jbang")).exists();
 
-        assertThat(projectDir.resolve("src/GreetingResource.java"))
+        assertThat(projectDir.resolve("src/main.java"))
                 .exists()
                 .satisfies(checkContains("//usr/bin/env jbang \"$0\" \"$@\" ; exit $?"))
                 .satisfies(checkContains("//DEPS io.quarkus:quarkus-resteasy"))
@@ -71,13 +73,12 @@ public class CreateJBangProjectTest extends PlatformAwareTestBase {
     }
 
     private CreateJBangProject newCreateJBangProject(Path dir) {
-        return new CreateJBangProject(dir, getPlatformDescriptor());
+        return new CreateJBangProject(QuarkusProjectHelper.getProject(dir, BuildTool.MAVEN));
     }
 
     private void assertCreateJBangProject(CreateJBangProject createJBangProjectProject)
             throws QuarkusCommandException {
-        final QuarkusCommandOutcome result = createJBangProjectProject
-                .execute();
+        final QuarkusCommandOutcome result = createJBangProjectProject.execute();
         assertTrue(result.isSuccess());
     }
 }

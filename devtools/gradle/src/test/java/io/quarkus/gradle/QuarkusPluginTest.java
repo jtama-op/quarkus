@@ -14,6 +14,8 @@ import org.gradle.api.tasks.TaskContainer;
 import org.gradle.testfixtures.ProjectBuilder;
 import org.junit.jupiter.api.Test;
 
+import io.quarkus.gradle.extension.QuarkusPluginExtension;
+
 public class QuarkusPluginTest {
 
     @Test
@@ -66,10 +68,12 @@ public class QuarkusPluginTest {
 
         final QuarkusPluginExtension extension = project.getExtensions().getByType(QuarkusPluginExtension.class);
 
-        final Set<File> outputSourceDirs = extension.outputSourcesDir();
-        assertThat(outputSourceDirs).hasSize(2);
+        final Set<File> outputSourceDirs = extension.combinedOutputSourceDirs();
+        assertThat(outputSourceDirs).hasSize(4);
         assertThat(outputSourceDirs).contains(new File(project.getBuildDir(), "classes/java/main"),
-                new File(project.getBuildDir(), "classes/scala/main"));
+                new File(project.getBuildDir(), "classes/java/test"),
+                new File(project.getBuildDir(), "classes/scala/main"),
+                new File(project.getBuildDir(), "classes/scala/test"));
 
     }
 }

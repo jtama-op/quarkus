@@ -1,7 +1,7 @@
 ////
 This guide is maintained in the main Quarkus repository
 and pull requests should be submitted there:
-https://github.com/quarkusio/quarkus/tree/master/docs/src/main/asciidoc
+https://github.com/quarkusio/quarkus/tree/main/docs/src/main/asciidoc
 ////
 = Quarkus - Introduction to Contexts and Dependency Injection
 
@@ -378,6 +378,54 @@ public class LoggingInterceptor {
 <6> Proceed to the next interceptor in the interceptor chain or invoke the intercepted business method.
 
 NOTE: Instances of interceptors are dependent objects of the bean instance they intercept, i.e. a new interceptor instance is created for each intercepted bean.
+
+[[decorators]]
+=== Decorators
+
+Decorators are similar to interceptors, but because they implement interfaces with business semantics, they are able to implement business logic.
+
+.Simple Decorator Example
+[source,java]
+----
+import javax.decorator.Decorator;
+import javax.decorator.Delegate;
+import javax.annotation.Priority;
+import javax.inject.Inject;
+import javax.enterprise.inject.Any;
+
+public interface Account {
+   void withdraw(BigDecimal amount);
+}
+
+@Priority(10) <1>
+@Decorator <2>
+public class LargeTxAccount implements Account { <3>
+
+   @Inject
+   @Any
+   @Delegate
+   Account delegate; <4>
+   
+   @Inject
+   LogService logService; <5>
+
+   void withdraw(BigDecimal amount) {
+      delegate.withdraw(amount); <6>
+      if (amount.compareTo(1000) > 0) {
+         logService.logWithdrawal(delegate, amount);
+      }
+   }
+    
+}
+----
+<1> `@Priority` enables the decorator. Decorators with smaller priority values are called first. 
+<2> `@Decorator` marks a decorator component.
+<3> The set of decorated types includes all bean types which are Java interfaces, except for `java.io.Serializable`.
+<4> Each decorator must declare exactly one _delegate injection point_. The decorator applies to beans that are assignable to this delegate injection point.
+<5> Decorators can inject other beans.
+<6> The decorator may invoke any method of the delegate object. And the container invokes either the next decorator in the chain or the business method of the intercepted instance.
+
+NOTE: Instances of decorators are dependent objects of the bean instance they intercept, i.e. a new decorator instance is created for each intercepted bean.
 
 === Events and Observers
 	

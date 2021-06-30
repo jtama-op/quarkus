@@ -18,11 +18,13 @@ import org.bson.codecs.pojo.annotations.BsonProperty;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import io.quarkus.mongodb.panache.PanacheQuery;
+import io.quarkus.mongodb.panache.PanacheUpdate;
 import io.quarkus.panache.common.Parameters;
 
 class MongoOperationsTest {
 
-    private final MongoOperations operations = new JavaMongoOperations();
+    private final MongoOperations<PanacheQuery<?>, PanacheUpdate> operations = new JavaMongoOperations();
 
     private static class DemoObj {
         public String field;
@@ -368,6 +370,15 @@ class MongoOperationsTest {
         update = operations.bindUpdate(Object.class, "{'$set':{'field': :field}}",
                 Parameters.with("field", "a value").map());
         assertEquals("{'$set':{'field': 'a value'}}", update);
+
+        // native update by index with $inc
+        update = operations.bindUpdate(DemoObj.class, "{'$inc':{'field': ?1}}", new Object[] { "a value" });
+        assertEquals("{'$inc':{'field': 'a value'}}", update);
+
+        // native update by name with $inc
+        update = operations.bindUpdate(Object.class, "{'$inc':{'field': :field}}",
+                Parameters.with("field", "a value").map());
+        assertEquals("{'$inc':{'field': 'a value'}}", update);
 
         // shortand update
         update = operations.bindUpdate(Object.class, "field", new Object[] { "a value" });

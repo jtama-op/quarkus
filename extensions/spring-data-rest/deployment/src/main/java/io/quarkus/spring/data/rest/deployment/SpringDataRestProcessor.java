@@ -15,6 +15,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.repository.CrudRepository;
 import org.springframework.data.repository.PagingAndSortingRepository;
 
+import io.quarkus.arc.deployment.AdditionalBeanBuildItem;
 import io.quarkus.arc.deployment.GeneratedBeanBuildItem;
 import io.quarkus.arc.deployment.GeneratedBeanGizmoAdaptor;
 import io.quarkus.arc.deployment.UnremovableBeanBuildItem;
@@ -26,10 +27,13 @@ import io.quarkus.gizmo.ClassOutput;
 import io.quarkus.rest.data.panache.deployment.ResourceMetadata;
 import io.quarkus.rest.data.panache.deployment.RestDataResourceBuildItem;
 import io.quarkus.rest.data.panache.deployment.properties.ResourcePropertiesBuildItem;
+import io.quarkus.resteasy.common.spi.ResteasyJaxrsProviderBuildItem;
 import io.quarkus.spring.data.rest.deployment.crud.CrudMethodsImplementor;
 import io.quarkus.spring.data.rest.deployment.crud.CrudPropertiesProvider;
 import io.quarkus.spring.data.rest.deployment.paging.PagingAndSortingMethodsImplementor;
 import io.quarkus.spring.data.rest.deployment.paging.PagingAndSortingPropertiesProvider;
+import io.quarkus.spring.data.rest.runtime.RestDataPanacheExceptionMapper;
+import io.quarkus.spring.data.rest.runtime.jta.TransactionalUpdateExecutor;
 
 class SpringDataRestProcessor {
 
@@ -48,6 +52,16 @@ class SpringDataRestProcessor {
     @BuildStep
     FeatureBuildItem feature() {
         return new FeatureBuildItem(SPRING_DATA_REST);
+    }
+
+    @BuildStep
+    ResteasyJaxrsProviderBuildItem registerRestDataPanacheExceptionMapper() {
+        return new ResteasyJaxrsProviderBuildItem(RestDataPanacheExceptionMapper.class.getName());
+    }
+
+    @BuildStep
+    AdditionalBeanBuildItem registerTransactionalExecutor() {
+        return AdditionalBeanBuildItem.unremovableOf(TransactionalUpdateExecutor.class);
     }
 
     @BuildStep

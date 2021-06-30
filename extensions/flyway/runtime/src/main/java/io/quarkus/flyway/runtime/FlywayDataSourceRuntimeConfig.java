@@ -72,6 +72,12 @@ public final class FlywayDataSourceRuntimeConfig {
     public boolean cleanAtStart;
 
     /**
+     * true to prevent Flyway clean operations, false otherwise.
+     */
+    @ConfigItem
+    public boolean cleanDisabled;
+
+    /**
      * true to execute Flyway automatically when the application starts, false otherwise.
      *
      */
@@ -109,12 +115,20 @@ public final class FlywayDataSourceRuntimeConfig {
     public boolean outOfOrder;
 
     /**
-     * Ignore missing migrations when reading the history table. When set to true any migration present in the history table but
-     * absent in the configured locations will be ignored (and logged as a warning), when false (the default) the validation
-     * step will fail.
+     * Ignore missing migrations when reading the history table. When set to true migrations from older versions present in the
+     * history table but absent in the configured locations will be ignored (and logged as a warning), when false (the default)
+     * the validation step will fail.
      */
     @ConfigItem
     public boolean ignoreMissingMigrations;
+
+    /**
+     * Ignore future migrations when reading the history table. When set to true migrations from newer versions present in the
+     * history table but absent in the configured locations will be ignored (and logged as a warning), when false (the default)
+     * the validation step will fail.
+     */
+    @ConfigItem
+    public boolean ignoreFutureMigrations;
 
     /**
      * Sets the placeholders to replace in SQL migration scripts.
@@ -140,4 +154,9 @@ public final class FlywayDataSourceRuntimeConfig {
     @ConfigItem
     public Optional<String> placeholderSuffix = Optional.empty();
 
+    /**
+     * The SQL statements to run to initialize a new database connection immediately after opening it.
+     */
+    @ConfigItem
+    public Optional<String> initSql = Optional.empty();
 }

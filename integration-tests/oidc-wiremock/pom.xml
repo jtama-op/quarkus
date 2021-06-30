@@ -13,10 +13,6 @@
     <name>Quarkus - Integration Tests - OpenID Connect Adapter WireMock</name>
     <description>Module that contains OpenID Connect related tests using WireMock</description>
 
-    <properties>
-        <keycloak.url>http://localhost:8180/auth</keycloak.url>
-    </properties>
-
     <dependencies>
         <dependency>
             <groupId>io.quarkus</groupId>
@@ -30,6 +26,11 @@
         <!-- test dependencies -->
         <dependency>
             <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-test-oidc-server</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
             <artifactId>quarkus-junit5</artifactId>
             <scope>test</scope>
         </dependency>
@@ -39,14 +40,15 @@
             <scope>test</scope>
         </dependency>
         <dependency>
-            <groupId>com.github.tomakehurst</groupId>
-            <artifactId>wiremock-jre8</artifactId>
+            <groupId>net.sourceforge.htmlunit</groupId>
+            <artifactId>htmlunit</artifactId>
             <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId> jakarta.servlet</groupId>
-            <artifactId>jakarta.servlet-api</artifactId>
-            <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.eclipse.jetty</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <!-- Minimal test dependencies to *-deployment artifacts for consistent build order -->
         <dependency>
@@ -87,19 +89,9 @@
         <plugins>
             <plugin>
                 <artifactId>maven-surefire-plugin</artifactId>
-                <configuration>
-                    <systemPropertyVariables>
-                        <keycloak.url>${keycloak.url}</keycloak.url>
-                    </systemPropertyVariables>
-                </configuration>
             </plugin>
             <plugin>
                 <artifactId>maven-failsafe-plugin</artifactId>
-                <configuration>
-                    <systemPropertyVariables>
-                        <keycloak.url>${keycloak.url}</keycloak.url>
-                    </systemPropertyVariables>
-                </configuration>
             </plugin>
             <plugin>
                 <groupId>io.quarkus</groupId>

@@ -5,7 +5,6 @@ import static io.smallrye.reactive.messaging.annotations.ConnectorAttribute.Dire
 import static io.smallrye.reactive.messaging.annotations.ConnectorAttribute.Direction.OUTGOING;
 
 import java.time.Duration;
-import java.util.Arrays;
 import java.util.Optional;
 
 import javax.enterprise.context.ApplicationScoped;
@@ -33,6 +32,8 @@ import io.vertx.core.http.HttpMethod;
  */
 @ConnectorAttribute(name = "url", type = "string", direction = OUTGOING, description = "The target URL", mandatory = true)
 @ConnectorAttribute(name = "serializer", type = "string", direction = OUTGOING, description = "Message serializer")
+@ConnectorAttribute(name = "maxPoolSize", type = "int", direction = OUTGOING, description = "Maximum pool size for connections")
+@ConnectorAttribute(name = "maxWaitQueueSize", type = "int", direction = OUTGOING, description = "Maximum requests allowed in the wait queue of the underlying client.  If the value is set to a negative number then the queue will be unbounded")
 @ConnectorAttribute(name = "maxRetries", type = "int", direction = OUTGOING, description = "The number of attempts to make for sending a request to a remote endpoint. Must not be less than zero", defaultValue = QuarkusHttpConnector.DEFAULT_MAX_ATTEMPTS_STR)
 @ConnectorAttribute(name = "jitter", type = "string", direction = OUTGOING, description = "Configures the random factor when using back-off with maxRetries > 0", defaultValue = QuarkusHttpConnector.DEFAULT_JITTER)
 @ConnectorAttribute(name = "delay", type = "string", direction = OUTGOING, description = "Configures a back-off delay between attempts to send a request. A random factor (jitter) is applied to increase the delay when several failures happen.")
@@ -80,7 +81,7 @@ public class QuarkusHttpConnector implements IncomingConnectorFactory, OutgoingC
             return HttpMethod.valueOf(methodAsString);
         } catch (IllegalArgumentException e) {
             String error = "Unsupported HTTP method: " + methodAsString + ". The supported methods are: "
-                    + Arrays.toString(HttpMethod.values());
+                    + HttpMethod.values();
             log.warn(error, e);
             throw new IllegalArgumentException(error);
         }
@@ -99,6 +100,9 @@ public class QuarkusHttpConnector implements IncomingConnectorFactory, OutgoingC
         String jitterAsString = config.getJitter();
         Integer maxRetries = config.getMaxRetries();
 
+        Optional<Integer> maxPoolSize = config.getMaxPoolSize();
+        Optional<Integer> maxWaitQueueSize = config.getMaxWaitQueueSize();
+
         double jitter;
         try {
             jitter = Double.valueOf(jitterAsString);
@@ -106,7 +110,8 @@ public class QuarkusHttpConnector implements IncomingConnectorFactory, OutgoingC
             throw new IllegalArgumentException(String.format("Failed to parse jitter value '%s' to a double.", jitterAsString));
         }
 
-        return new HttpSink(vertx, method, url, serializer, maxRetries, jitter, delay, serializerFactory).sink();
+        return new HttpSink(vertx, method, url, serializer, maxRetries, jitter, delay, maxPoolSize, maxWaitQueueSize,
+                serializerFactory).sink();
     }
 
 }

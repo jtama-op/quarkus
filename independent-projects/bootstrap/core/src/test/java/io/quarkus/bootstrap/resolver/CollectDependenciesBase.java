@@ -6,6 +6,7 @@ import io.quarkus.bootstrap.model.AppDependency;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -33,7 +34,6 @@ public abstract class CollectDependenciesBase extends ResolverSetupCleanup {
     @Test
     public void testCollectedDependencies() throws Exception {
         install(root);
-
         List<AppDependency> expected;
         if (deploymentDeps.isEmpty()) {
             expected = expectedResult;
@@ -43,7 +43,7 @@ public abstract class CollectDependenciesBase extends ResolverSetupCleanup {
             expected.addAll(deploymentDeps);
         }
         final List<AppDependency> resolvedDeps = getTestResolver().resolveModel(root.toAppArtifact()).getFullDeploymentDeps();
-        assertEquals(expected, resolvedDeps);
+        assertEquals(new HashSet<>(expected), new HashSet<>(resolvedDeps));
     }
 
     protected BootstrapAppModelResolver getTestResolver() throws Exception {
@@ -79,8 +79,9 @@ public abstract class CollectDependenciesBase extends ResolverSetupCleanup {
         return dep;
     }
 
-    protected void install(TsQuarkusExt ext) {
+    protected TsQuarkusExt install(TsQuarkusExt ext) {
         install(ext, true);
+        return ext;
     }
 
     protected void install(TsQuarkusExt ext, boolean collected) {
@@ -148,6 +149,11 @@ public abstract class CollectDependenciesBase extends ResolverSetupCleanup {
             deploymentDeps = new ArrayList<>();
         }
         deploymentDeps.add(new AppDependency(ext.toAppArtifact(), "compile", false));
+    }
+
+    protected void addManagedDep(TsQuarkusExt ext) {
+        addManagedDep(ext.runtime);
+        addManagedDep(ext.deployment);
     }
 
     protected void addManagedDep(TsArtifact dep) {

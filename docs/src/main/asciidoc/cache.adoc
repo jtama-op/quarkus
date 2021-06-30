@@ -1,7 +1,7 @@
 ////
 This guide is maintained in the main Quarkus repository
 and pull requests should be submitted there:
-https://github.com/quarkusio/quarkus/tree/master/docs/src/main/asciidoc
+https://github.com/quarkusio/quarkus/tree/main/docs/src/main/asciidoc
 ////
 = Quarkus - Application Data Caching
 :extension-status: preview
@@ -18,7 +18,7 @@ To complete this guide, you need:
 
 * less than 15 minutes
 * an IDE
-* JDK 1.8+ installed with `JAVA_HOME` configured appropriately
+* JDK 11+ installed with `JAVA_HOME` configured appropriately
 * Apache Maven {maven-version}
 
 == Scenario

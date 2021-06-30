@@ -1,38 +1,59 @@
 package io.quarkus.oidc.token.propagation;
 
 import java.io.IOException;
+import java.util.Collections;
+import java.util.Optional;
 
-import javax.annotation.Priority;
+import javax.annotation.PostConstruct;
+import javax.enterprise.inject.Instance;
 import javax.inject.Inject;
-import javax.inject.Singleton;
-import javax.ws.rs.Priorities;
 import javax.ws.rs.client.ClientRequestContext;
-import javax.ws.rs.client.ClientRequestFilter;
-import javax.ws.rs.core.HttpHeaders;
-import javax.ws.rs.core.Response;
-import javax.ws.rs.ext.Provider;
 
-import org.jboss.logging.Logger;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 
-import io.quarkus.oidc.AccessTokenCredential;
+import io.quarkus.arc.Arc;
+import io.quarkus.oidc.client.OidcClient;
+import io.quarkus.oidc.client.OidcClients;
+import io.quarkus.oidc.token.propagation.runtime.AbstractTokenRequestFilter;
+import io.quarkus.security.credential.TokenCredential;
 
-@Provider
-@Singleton
-@Priority(Priorities.AUTHENTICATION)
-public class AccessTokenRequestFilter implements ClientRequestFilter {
-    private static final Logger LOG = Logger.getLogger(AccessTokenRequestFilter.class);
-    private static final String BEARER_SCHEME_WITH_SPACE = "Bearer ";
+public class AccessTokenRequestFilter extends AbstractTokenRequestFilter {
+    private static final String EXCHANGE_SUBJECT_TOKEN = "subject_token";
 
     @Inject
-    AccessTokenCredential tokenCredential;
+    Instance<TokenCredential> accessToken;
+
+    @Inject
+    @ConfigProperty(name = "quarkus.oidc-token-propagation.client-name")
+    Optional<String> clientName;
+    @Inject
+    @ConfigProperty(name = "quarkus.oidc-token-propagation.exchange-token")
+    boolean exchangeToken;
+
+    OidcClient exchangeTokenClient;
+
+    @PostConstruct
+    public void initExchangeTokenClient() {
+        if (exchangeToken) {
+            OidcClients clients = Arc.container().instance(OidcClients.class).get();
+            exchangeTokenClient = clientName.isPresent() ? clients.getClient(clientName.get()) : clients.getClient();
+        }
+    }
 
     @Override
     public void filter(ClientRequestContext requestContext) throws IOException {
-        try {
-            requestContext.getHeaders().add(HttpHeaders.AUTHORIZATION, BEARER_SCHEME_WITH_SPACE + tokenCredential.getToken());
-        } catch (Exception ex) {
-            LOG.debugf("Access token is not available, aborting the request with HTTP 401 error: %s", ex.getMessage());
-            requestContext.abortWith(Response.status(401).build());
+        if (verifyTokenInstance(requestContext, accessToken)) {
+            propagateToken(requestContext, exchangeTokenIfNeeded(accessToken.get().getToken()));
+        }
+    }
+
+    private String exchangeTokenIfNeeded(String token) {
+        if (exchangeTokenClient != null) {
+            // more dynamic parameters can be configured if required
+            return exchangeTokenClient.getTokens(Collections.singletonMap(EXCHANGE_SUBJECT_TOKEN, token))
+                    .await().indefinitely().getAccessToken();
+        } else {
+            return token;
         }
     }
 }

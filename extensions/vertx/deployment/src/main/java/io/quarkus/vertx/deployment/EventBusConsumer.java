@@ -56,8 +56,6 @@ class EventBusConsumer {
     private static final MethodDescriptor MUTINY_MESSAGE_NEW_INSTANCE = MethodDescriptor.ofMethod(
             io.vertx.mutiny.core.eventbus.Message.class,
             "newInstance", io.vertx.mutiny.core.eventbus.Message.class, Message.class);
-    private static final MethodDescriptor MESSAGE_REPLY = MethodDescriptor.ofMethod(Message.class, "reply", void.class,
-            Object.class);
     private static final MethodDescriptor MESSAGE_BODY = MethodDescriptor.ofMethod(Message.class, "body", Object.class);
     private static final MethodDescriptor INSTANCE_HANDLE_DESTROY = MethodDescriptor
             .ofMethod(InstanceHandle.class, "destroy",
@@ -111,6 +109,13 @@ class EventBusConsumer {
             isBlocking.returnValue(isBlocking.load(true));
         }
 
+        AnnotationValue orderedValue = consumeEvent.value("ordered");
+        boolean ordered = orderedValue != null && orderedValue.asBoolean();
+        if (ordered) {
+            MethodCreator isOrdered = invokerCreator.getMethodCreator("isOrdered", boolean.class);
+            isOrdered.returnValue(isOrdered.load(true));
+        }
+
         implementConstructor(bean, invokerCreator, beanField, containerField);
         implementInvoke(bean, method, invokerCreator, beanField.getFieldDescriptor(), containerField.getFieldDescriptor());
 
@@ -139,7 +144,7 @@ class EventBusConsumer {
             FieldDescriptor containerField) {
 
         // The method descriptor is: CompletionStage invokeBean(Message message)
-        MethodCreator invoke = invokerCreator.getMethodCreator("invokeBean", CompletionStage.class, Message.class)
+        MethodCreator invoke = invokerCreator.getMethodCreator("invokeBean", Object.class, Message.class)
                 .addException(Exception.class);
 
         ResultHandle containerHandle = invoke.readInstanceField(containerField, invoke.getThis());
@@ -149,7 +154,7 @@ class EventBusConsumer {
         ResultHandle beanInstanceHandle = invoke
                 .invokeInterfaceMethod(INSTANCE_HANDLE_GET, instanceHandle);
         ResultHandle messageHandle = invoke.getMethodParam(0);
-        ResultHandle completionStage;
+        ResultHandle result;
 
         Type paramType = method.parameters().get(0);
         if (paramType.name().equals(MESSAGE)) {
@@ -158,7 +163,7 @@ class EventBusConsumer {
                     MethodDescriptor
                             .ofMethod(bean.getImplClazz().name().toString(), method.name(), void.class, Message.class),
                     beanInstanceHandle, messageHandle);
-            completionStage = invoke.loadNull();
+            result = invoke.loadNull();
         } else if (paramType.name().equals(MUTINY_MESSAGE)) {
             // io.vertx.mutiny.core.eventbus.Message
             ResultHandle mutinyMessageHandle = invoke.invokeStaticMethod(MUTINY_MESSAGE_NEW_INSTANCE, messageHandle);
@@ -166,7 +171,7 @@ class EventBusConsumer {
                     MethodDescriptor.ofMethod(bean.getImplClazz().name().toString(), method.name(), void.class,
                             io.vertx.mutiny.core.eventbus.Message.class),
                     beanInstanceHandle, mutinyMessageHandle);
-            completionStage = invoke.loadNull();
+            result = invoke.loadNull();
         } else {
             // Parameter is payload
             ResultHandle bodyHandle = invoke.invokeInterfaceMethod(MESSAGE_BODY, messageHandle);
@@ -176,17 +181,16 @@ class EventBusConsumer {
                     beanInstanceHandle, bodyHandle);
             if (returnHandle != null) {
                 if (method.returnType().name().equals(COMPLETION_STAGE)) {
-                    completionStage = returnHandle;
+                    result = returnHandle;
                 } else if (method.returnType().name().equals(UNI)) {
-                    completionStage = invoke.invokeInterfaceMethod(SUBSCRIBE_AS_COMPLETION_STAGE,
+                    result = invoke.invokeInterfaceMethod(SUBSCRIBE_AS_COMPLETION_STAGE,
                             returnHandle);
                 } else {
                     // Message.reply(returnValue)
-                    invoke.invokeInterfaceMethod(MESSAGE_REPLY, messageHandle, returnHandle);
-                    completionStage = invoke.loadNull();
+                    result = returnHandle;
                 }
             } else {
-                completionStage = invoke.loadNull();
+                result = invoke.loadNull();
             }
         }
 
@@ -195,7 +199,7 @@ class EventBusConsumer {
             invoke.invokeInterfaceMethod(INSTANCE_HANDLE_DESTROY, instanceHandle);
         }
 
-        invoke.returnValue(completionStage);
+        invoke.returnValue(result);
     }
 
     private EventBusConsumer() {

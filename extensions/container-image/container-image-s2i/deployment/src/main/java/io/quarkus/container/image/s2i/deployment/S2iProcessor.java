@@ -26,19 +26,19 @@ import java.util.stream.Stream;
 
 import org.jboss.logging.Logger;
 
-import io.dekorate.deps.kubernetes.api.model.HasMetadata;
-import io.dekorate.deps.kubernetes.api.model.KubernetesList;
-import io.dekorate.deps.kubernetes.api.model.Secret;
-import io.dekorate.deps.kubernetes.client.KubernetesClient;
-import io.dekorate.deps.kubernetes.client.dsl.LogWatch;
-import io.dekorate.deps.openshift.api.model.Build;
-import io.dekorate.deps.openshift.api.model.BuildConfig;
-import io.dekorate.deps.openshift.api.model.ImageStream;
-import io.dekorate.deps.openshift.client.OpenShiftClient;
 import io.dekorate.utils.Clients;
 import io.dekorate.utils.Serialization;
+import io.fabric8.kubernetes.api.model.HasMetadata;
+import io.fabric8.kubernetes.api.model.KubernetesList;
+import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.client.Config;
+import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientException;
+import io.fabric8.kubernetes.client.dsl.LogWatch;
+import io.fabric8.openshift.api.model.Build;
+import io.fabric8.openshift.api.model.BuildConfig;
+import io.fabric8.openshift.api.model.ImageStream;
+import io.fabric8.openshift.client.OpenShiftClient;
 import io.quarkus.bootstrap.model.AppDependency;
 import io.quarkus.container.image.deployment.ContainerImageConfig;
 import io.quarkus.container.image.deployment.util.ImageUtil;
@@ -47,12 +47,10 @@ import io.quarkus.container.spi.BaseImageInfoBuildItem;
 import io.quarkus.container.spi.ContainerImageBuildRequestBuildItem;
 import io.quarkus.container.spi.ContainerImageInfoBuildItem;
 import io.quarkus.container.spi.ContainerImagePushRequestBuildItem;
-import io.quarkus.deployment.Capability;
 import io.quarkus.deployment.IsNormalNotRemoteDev;
 import io.quarkus.deployment.annotations.BuildProducer;
 import io.quarkus.deployment.annotations.BuildStep;
 import io.quarkus.deployment.builditem.ArchiveRootBuildItem;
-import io.quarkus.deployment.builditem.CapabilityBuildItem;
 import io.quarkus.deployment.builditem.GeneratedFileSystemResourceBuildItem;
 import io.quarkus.deployment.pkg.PackageConfig;
 import io.quarkus.deployment.pkg.builditem.ArtifactResultBuildItem;
@@ -61,7 +59,7 @@ import io.quarkus.deployment.pkg.builditem.JarBuildItem;
 import io.quarkus.deployment.pkg.builditem.NativeImageBuildItem;
 import io.quarkus.deployment.pkg.builditem.OutputTargetBuildItem;
 import io.quarkus.deployment.pkg.steps.NativeBuild;
-import io.quarkus.kubernetes.client.deployment.KubernetesClientErrorHanlder;
+import io.quarkus.kubernetes.client.deployment.KubernetesClientErrorHandler;
 import io.quarkus.kubernetes.client.spi.KubernetesClientBuildItem;
 import io.quarkus.kubernetes.spi.KubernetesCommandBuildItem;
 import io.quarkus.kubernetes.spi.KubernetesEnvBuildItem;
@@ -78,11 +76,6 @@ public class S2iProcessor {
     @BuildStep
     public AvailableContainerImageExtensionBuildItem availability() {
         return new AvailableContainerImageExtensionBuildItem(S2I);
-    }
-
-    @BuildStep(onlyIf = S2iBuild.class)
-    public CapabilityBuildItem capability() {
-        return new CapabilityBuildItem(Capability.CONTAINER_IMAGE_S2I);
     }
 
     @BuildStep(onlyIf = { IsNormalNotRemoteDev.class, S2iBuild.class }, onlyIfNot = NativeBuild.class)
@@ -313,7 +306,7 @@ public class S2iProcessor {
             S2iUtils.waitForImageStreamTags(client, buildResources, 2, TimeUnit.MINUTES);
 
         } catch (KubernetesClientException e) {
-            KubernetesClientErrorHanlder.handle(e);
+            KubernetesClientErrorHandler.handle(e);
         }
     }
 
@@ -400,7 +393,7 @@ public class S2iProcessor {
 
     private static RuntimeException s2iException(Throwable t) {
         if (t instanceof KubernetesClientException) {
-            KubernetesClientErrorHanlder.handle((KubernetesClientException) t);
+            KubernetesClientErrorHandler.handle((KubernetesClientException) t);
         }
         return new RuntimeException("Execution of s2i build failed. See s2i output for more details", t);
     }

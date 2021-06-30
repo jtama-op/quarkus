@@ -10,6 +10,7 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Deque;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.Executor;
@@ -27,6 +28,7 @@ import javax.ws.rs.ext.WriterInterceptor;
 import org.jboss.resteasy.reactive.common.core.AbstractResteasyReactiveContext;
 import org.jboss.resteasy.reactive.common.util.Encode;
 import org.jboss.resteasy.reactive.common.util.PathSegmentImpl;
+import org.jboss.resteasy.reactive.server.core.multipart.FormData;
 import org.jboss.resteasy.reactive.server.core.serialization.EntityWriter;
 import org.jboss.resteasy.reactive.server.injection.ResteasyReactiveInjectionContext;
 import org.jboss.resteasy.reactive.server.jaxrs.AsyncResponseImpl;
@@ -58,11 +60,11 @@ public abstract class ResteasyReactiveRequestContext
      */
     private Object[] parameters;
     private RuntimeResource target;
+
     /**
-     * When a subresource has been located and the processing has been restarted (and thus target point to the new subresource),
-     * this field contains the target that resulted in the offloading to the new target
+     * info about path params and other data about previously matched sub resource locators
      */
-    private RuntimeResource locatorTarget;
+    private PreviousResource previousResource;
 
     /**
      * The parameter values extracted from the path.
@@ -79,11 +81,6 @@ public abstract class ResteasyReactiveRequestContext
      * Note: those are decoded.
      */
     private Object pathParamValues;
-    /**
-     * When a subresource has been located and the processing has been restarted (and thus target point to the new subresource),
-     * this field contains the pathParamValues of the target that resulted in the offloading to the new target
-     */
-    private Object locatorPathParamValues;
 
     private UriInfo uriInfo;
     /**
@@ -143,6 +140,7 @@ public abstract class ResteasyReactiveRequestContext
     private SecurityContext securityContext;
     private OutputStream outputStream;
     private OutputStream underlyingOutputStream;
+    private FormData formData;
 
     public ResteasyReactiveRequestContext(Deployment deployment, ProvidersImpl providers,
             ThreadSetupAction requestContext, ServerRestHandler[] handlerChain, ServerRestHandler[] abortHandlerChain) {
@@ -178,10 +176,22 @@ public abstract class ResteasyReactiveRequestContext
         position = 0;
         parameters = new Object[target.getParameterTypes().length];
         if (setLocatorTarget) {
-            this.locatorTarget = this.target;
-            this.locatorPathParamValues = this.pathParamValues;
+            previousResource = new PreviousResource(this.target, pathParamValues, previousResource);
         }
         this.target = target;
+    }
+
+    /**
+     * Meant to be used when a error occurred early in processing chain
+     */
+    @Override
+    public void abortWith(Response response) {
+        setResult(response);
+        restart(getAbortHandlerChain());
+        // this is a valid action after suspend, in which case we must resume
+        if (isSuspended()) {
+            resume();
+        }
     }
 
     /**
@@ -220,10 +230,6 @@ public abstract class ResteasyReactiveRequestContext
 
     public String getPathParam(int index) {
         return doGetPathParam(index, pathParamValues);
-    }
-
-    public String getLocatorPathParam(int index) {
-        return doGetPathParam(index, locatorPathParamValues);
     }
 
     private String doGetPathParam(int index, Object pathParamValues) {
@@ -318,10 +324,6 @@ public abstract class ResteasyReactiveRequestContext
 
     public RuntimeResource getTarget() {
         return target;
-    }
-
-    public RuntimeResource getLocatorTarget() {
-        return locatorTarget;
     }
 
     public void mapExceptionIfPresent() {
@@ -842,20 +844,29 @@ public abstract class ResteasyReactiveRequestContext
 
     @Override
     public Object getFormParameter(String name, boolean single, boolean encoded) {
-        if (single) {
-            String val = serverRequest().getFormAttribute(name);
-            if (encoded && val != null) {
-                val = Encode.encodeQueryParam(val);
-            }
-            return val;
+        if (formData == null) {
+            return null;
         }
-        List<String> strings = serverRequest().getAllFormAttributes(name);
-        if (encoded) {
-            List<String> newStrings = new ArrayList<>();
-            for (String i : strings) {
-                newStrings.add(Encode.encodeQueryParam(i));
+        if (single) {
+            FormData.FormValue val = formData.getFirst(name);
+            if (val == null || val.isFileItem()) {
+                return null;
             }
-            return newStrings;
+            if (encoded) {
+                return Encode.encodeQueryParam(val.getValue());
+            }
+            return val.getValue();
+        }
+        Deque<FormData.FormValue> val = formData.get(name);
+        List<String> strings = new ArrayList<>();
+        if (val != null) {
+            for (FormData.FormValue i : val) {
+                if (encoded) {
+                    strings.add(Encode.encodeQueryParam(i.getValue()));
+                } else {
+                    strings.add(i.getValue());
+                }
+            }
         }
         return strings;
 
@@ -928,4 +939,85 @@ public abstract class ResteasyReactiveRequestContext
     protected abstract Executor getEventLoop();
 
     public abstract Runnable registerTimer(long millis, Runnable task);
+
+    public String getResourceLocatorPathParam(String name) {
+        return getResourceLocatorPathParam(name, previousResource);
+    }
+
+    public FormData getFormData() {
+        return formData;
+    }
+
+    public ResteasyReactiveRequestContext setFormData(FormData formData) {
+        this.formData = formData;
+        return this;
+    }
+
+    private String getResourceLocatorPathParam(String name, PreviousResource previousResource) {
+        if (previousResource == null) {
+            return null;
+        }
+
+        int index = 0;
+        URITemplate classPath = previousResource.locatorTarget.getClassPath();
+        if (classPath != null) {
+            for (URITemplate.TemplateComponent component : classPath.components) {
+                if (component.name != null) {
+                    if (component.name.equals(name)) {
+                        return doGetPathParam(index, previousResource.locatorPathParamValues);
+                    }
+                    index++;
+                } else if (component.names != null) {
+                    for (String nm : component.names) {
+                        if (nm.equals(name)) {
+                            return doGetPathParam(index, previousResource.locatorPathParamValues);
+                        }
+                    }
+                    index++;
+                }
+            }
+        }
+        for (URITemplate.TemplateComponent component : previousResource.locatorTarget.getPath().components) {
+            if (component.name != null) {
+                if (component.name.equals(name)) {
+                    return doGetPathParam(index, previousResource.locatorPathParamValues);
+                }
+                index++;
+            } else if (component.names != null) {
+                for (String nm : component.names) {
+                    if (nm.equals(name)) {
+                        return doGetPathParam(index, previousResource.locatorPathParamValues);
+                    }
+                }
+                index++;
+            }
+        }
+        return getResourceLocatorPathParam(name, previousResource.prev);
+    }
+
+    static class PreviousResource {
+
+        public PreviousResource(RuntimeResource locatorTarget, Object locatorPathParamValues, PreviousResource prev) {
+            this.locatorTarget = locatorTarget;
+            this.locatorPathParamValues = locatorPathParamValues;
+            this.prev = prev;
+        }
+
+        /**
+         * When a subresource has been located and the processing has been restarted (and thus target point to the new
+         * subresource),
+         * this field contains the target that resulted in the offloading to the new target
+         */
+        private final RuntimeResource locatorTarget;
+
+        /**
+         * When a subresource has been located and the processing has been restarted (and thus target point to the new
+         * subresource),
+         * this field contains the pathParamValues of the target that resulted in the offloading to the new target
+         */
+        private final Object locatorPathParamValues;
+
+        private final PreviousResource prev;
+
+    }
 }

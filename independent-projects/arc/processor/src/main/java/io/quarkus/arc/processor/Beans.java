@@ -448,17 +448,25 @@ final class Beans {
 
     static void resolveInjectionPoint(BeanDeployment deployment, InjectionTargetInfo target, InjectionPointInfo injectionPoint,
             List<Throwable> errors) {
+        if (injectionPoint.isDelegate()) {
+            // Skip delegate injection points
+            return;
+        }
         BuiltinBean builtinBean = BuiltinBean.resolve(injectionPoint);
         if (builtinBean != null) {
-            if (BuiltinBean.INJECTION_POINT.equals(builtinBean)
+            if (BuiltinBean.INJECTION_POINT == builtinBean
                     && (target.kind() != TargetKind.BEAN || !BuiltinScope.DEPENDENT.is(target.asBean().getScope()))) {
                 errors.add(new DefinitionException("Only @Dependent beans can access metadata about an injection point: "
                         + injectionPoint.getTargetInfo()));
-            }
-            if (BuiltinBean.EVENT_METADATA.equals(builtinBean)
+            } else if (BuiltinBean.EVENT_METADATA == builtinBean
                     && target.kind() != TargetKind.OBSERVER) {
                 errors.add(new DefinitionException("EventMetadata can be only injected into an observer method: "
                         + injectionPoint.getTargetInfo()));
+            } else if (BuiltinBean.INSTANCE == builtinBean
+                    && injectionPoint.getType().kind() != Kind.PARAMETERIZED_TYPE) {
+                errors.add(
+                        new DefinitionException("An injection point of raw type javax.enterprise.inject.Instance is defined: "
+                                + injectionPoint.getTargetInfo()));
             }
             // Skip built-in beans
             return;
@@ -502,7 +510,7 @@ final class Beans {
 
     private static void addStandardErroneousDependencyMessage(InjectionTargetInfo target, InjectionPointInfo injectionPoint,
             StringBuilder message) {
-        message.append(injectionPoint.getRequiredType());
+        message.append(injectionPoint.getType());
         message.append(" and qualifiers ");
         message.append(injectionPoint.getRequiredQualifiers());
         message.append("\n\t- java member: ");

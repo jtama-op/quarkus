@@ -1,8 +1,8 @@
 package io.quarkus.devtools.project.buildfile;
 
-import io.quarkus.bootstrap.model.AppArtifactCoords;
-import io.quarkus.bootstrap.model.AppArtifactKey;
-import io.quarkus.platform.descriptor.QuarkusPlatformDescriptor;
+import io.quarkus.maven.ArtifactCoords;
+import io.quarkus.maven.ArtifactKey;
+import io.quarkus.registry.catalog.ExtensionCatalog;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -27,13 +27,13 @@ abstract class AbstractGradleBuildFile extends BuildFile {
 
     private final AtomicReference<Model> modelReference = new AtomicReference<>();
 
-    public AbstractGradleBuildFile(final Path projectDirPath, final QuarkusPlatformDescriptor platformDescriptor) {
-        this(projectDirPath, platformDescriptor, null);
+    public AbstractGradleBuildFile(final Path projectDirPath, final ExtensionCatalog catalog) {
+        this(projectDirPath, catalog, null);
     }
 
-    public AbstractGradleBuildFile(final Path projectDirPath, final QuarkusPlatformDescriptor platformDescriptor,
+    public AbstractGradleBuildFile(final Path projectDirPath, final ExtensionCatalog catalog,
             Path rootProjectPath) {
-        super(projectDirPath, platformDescriptor);
+        super(projectDirPath, catalog);
         this.rootProjectPath = rootProjectPath;
     }
 
@@ -60,7 +60,7 @@ abstract class AbstractGradleBuildFile extends BuildFile {
         writeToProjectFile(getBuildGradlePath(), getModel().getBuildContent().getBytes());
     }
 
-    static String createDependencyCoordinatesString(AppArtifactCoords coords, boolean managed, char quoteChar) {
+    static String createDependencyCoordinatesString(ArtifactCoords coords, boolean managed, char quoteChar) {
         StringBuilder newDependency = new StringBuilder().append(quoteChar)
                 .append(coords.getGroupId()).append(":").append(coords.getArtifactId());
         if (!managed &&
@@ -101,7 +101,7 @@ abstract class AbstractGradleBuildFile extends BuildFile {
     }
 
     @Override
-    protected void removeDependency(AppArtifactKey key) {
+    protected void removeDependency(ArtifactKey key) {
         StringBuilder newBuildContent = new StringBuilder();
         Scanner scanner = new Scanner(getModel().getBuildContent());
         while (scanner.hasNextLine()) {

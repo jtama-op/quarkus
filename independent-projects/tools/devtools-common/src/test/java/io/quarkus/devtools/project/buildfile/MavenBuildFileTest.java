@@ -2,9 +2,9 @@ package io.quarkus.devtools.project.buildfile;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import io.quarkus.bootstrap.model.AppArtifactCoords;
+import io.quarkus.maven.ArtifactCoords;
 import io.quarkus.maven.utilities.MojoUtils;
-import io.quarkus.platform.descriptor.QuarkusPlatformDescriptor;
+import io.quarkus.registry.catalog.ExtensionCatalog;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Properties;
@@ -39,13 +39,13 @@ class MavenBuildFileTest {
         model.setDependencyManagement(depMan);
         Path pomPath = projectDirPath.resolve("pom.xml");
         MojoUtils.write(model, pomPath.toFile());
-        QuarkusPlatformDescriptor mock = Mockito.mock(QuarkusPlatformDescriptor.class);
+        ExtensionCatalog mock = Mockito.mock(ExtensionCatalog.class);
         mavenBuildFile = new MavenBuildFile(projectDirPath, mock);
     }
 
     @Test
     void shouldNotAddManagedDependencyWithProperties() throws IOException {
-        AppArtifactCoords addedDep = new AppArtifactCoords("bar", "pops", "pom", "1");
+        ArtifactCoords addedDep = new ArtifactCoords("bar", "pops", "pom", "1");
         assertThat(mavenBuildFile.addDependency(addedDep, false)).isFalse();
     }
 

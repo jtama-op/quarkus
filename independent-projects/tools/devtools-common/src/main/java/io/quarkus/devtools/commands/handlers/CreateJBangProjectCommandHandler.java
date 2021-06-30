@@ -1,19 +1,19 @@
 package io.quarkus.devtools.commands.handlers;
 
-import static io.quarkus.devtools.codestarts.jbang.QuarkusJBangCodestartCatalog.JBangDataKey.QUARKUS_BOM_ARTIFACT_ID;
-import static io.quarkus.devtools.codestarts.jbang.QuarkusJBangCodestartCatalog.JBangDataKey.QUARKUS_BOM_GROUP_ID;
-import static io.quarkus.devtools.codestarts.jbang.QuarkusJBangCodestartCatalog.JBangDataKey.QUARKUS_BOM_VERSION;
 import static io.quarkus.devtools.commands.handlers.QuarkusCommandHandlers.computeCoordsFromQuery;
 
-import io.quarkus.bootstrap.model.AppArtifactCoords;
 import io.quarkus.devtools.codestarts.jbang.QuarkusJBangCodestartCatalog;
 import io.quarkus.devtools.codestarts.jbang.QuarkusJBangCodestartProjectInput;
+import io.quarkus.devtools.codestarts.jbang.QuarkusJBangCodestartProjectInputBuilder;
+import io.quarkus.devtools.commands.CreateProject;
 import io.quarkus.devtools.commands.data.QuarkusCommandException;
 import io.quarkus.devtools.commands.data.QuarkusCommandInvocation;
 import io.quarkus.devtools.commands.data.QuarkusCommandOutcome;
 import io.quarkus.devtools.messagewriter.MessageIcons;
+import io.quarkus.devtools.project.QuarkusProject;
 import io.quarkus.devtools.project.codegen.ProjectGenerator;
-import io.quarkus.platform.descriptor.QuarkusPlatformDescriptor;
+import io.quarkus.maven.ArtifactCoords;
+import io.quarkus.registry.catalog.ExtensionCatalog;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Collections;
@@ -25,18 +25,32 @@ public class CreateJBangProjectCommandHandler implements QuarkusCommandHandler {
     @Override
     public QuarkusCommandOutcome execute(QuarkusCommandInvocation invocation) throws QuarkusCommandException {
         final Set<String> extensionsQuery = invocation.getValue(ProjectGenerator.EXTENSIONS, Collections.emptySet());
-        final List<AppArtifactCoords> extensionsToAdd = computeCoordsFromQuery(invocation, extensionsQuery);
+        final List<ArtifactCoords> extensionsToAdd = computeCoordsFromQuery(invocation, extensionsQuery);
         if (extensionsToAdd == null) {
             throw new QuarkusCommandException("Failed to create project because of invalid extensions");
         }
 
-        final QuarkusJBangCodestartProjectInput input = QuarkusJBangCodestartProjectInput.builder()
+        final ExtensionCatalog catalog = invocation.getExtensionsCatalog();
+
+        final boolean noWrapper = invocation.getValue("noJBangWrapper", false) ||
+                invocation.getValue(CreateProject.NO_BUILDTOOL_WRAPPER, false);
+
+        final QuarkusJBangCodestartProjectInputBuilder builder = QuarkusJBangCodestartProjectInput.builder()
                 .addExtensions(extensionsToAdd)
-                .setNoJBangWrapper(invocation.getBooleanValue("noJBangWrapper"))
-                .putData(QUARKUS_BOM_GROUP_ID, invocation.getPlatformDescriptor().getBomGroupId())
-                .putData(QUARKUS_BOM_ARTIFACT_ID, invocation.getPlatformDescriptor().getBomArtifactId())
-                .putData(QUARKUS_BOM_VERSION, invocation.getPlatformDescriptor().getBomVersion())
-                .build();
+                .setNoJBangWrapper(noWrapper)
+                .putData("quarkus.version", invocation.getExtensionsCatalog().getQuarkusCoreVersion());
+
+        if (catalog.getBom() != null) {
+            // TODO properly import the BOMs
+            final ArtifactCoords firstBom = catalog.getBom();
+            builder.putData(QuarkusJBangCodestartCatalog.JBangDataKey.QUARKUS_BOM_GROUP_ID.key(),
+                    firstBom.getGroupId())
+                    .putData(QuarkusJBangCodestartCatalog.JBangDataKey.QUARKUS_BOM_ARTIFACT_ID.key(),
+                            firstBom.getArtifactId())
+                    .putData(QuarkusJBangCodestartCatalog.JBangDataKey.QUARKUS_BOM_VERSION.key(),
+                            firstBom.getVersion());
+        }
+        final QuarkusJBangCodestartProjectInput input = builder.build();
 
         final Path projectDir = invocation.getQuarkusProject().getProjectDirPath();
         try {
@@ -46,18 +60,18 @@ public class CreateJBangProjectCommandHandler implements QuarkusCommandHandler {
                         + extensionsToAdd.stream().map(e -> "- " + e.getGroupId() + ":" + e.getArtifactId() + "\n")
                                 .collect(Collectors.joining()));
             }
-            getCatalog(invocation.getPlatformDescriptor()).createProject(input).generate(projectDir);
+            getCatalog(invocation.getQuarkusProject()).createProject(input).generate(projectDir);
             invocation.log()
-                    .info("\n-----------\n" + MessageIcons.NOOP_ICON
+                    .info("\n-----------\n" + MessageIcons.OK_ICON + " "
                             + " jbang project has been successfully generated in:\n--> "
                             + invocation.getQuarkusProject().getProjectDirPath().toString() + "\n-----------");
         } catch (IOException e) {
-            throw new QuarkusCommandException("Failed to create JBang project", e);
+            throw new QuarkusCommandException("Failed to create JBang project: " + e.getMessage(), e);
         }
         return QuarkusCommandOutcome.success();
     }
 
-    private QuarkusJBangCodestartCatalog getCatalog(QuarkusPlatformDescriptor platformDescriptor) throws IOException {
-        return QuarkusJBangCodestartCatalog.fromQuarkusPlatformDescriptor(platformDescriptor);
+    private QuarkusJBangCodestartCatalog getCatalog(QuarkusProject project) throws IOException {
+        return QuarkusJBangCodestartCatalog.fromResourceLoaders(project.getCodestartResourceLoaders());
     }
 }

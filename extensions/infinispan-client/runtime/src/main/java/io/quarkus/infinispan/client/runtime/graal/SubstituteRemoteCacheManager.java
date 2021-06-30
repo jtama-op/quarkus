@@ -5,6 +5,9 @@ import org.infinispan.client.hotrod.configuration.Configuration;
 import org.infinispan.client.hotrod.impl.InternalRemoteCache;
 import org.infinispan.client.hotrod.impl.operations.OperationsFactory;
 import org.infinispan.commons.marshall.Marshaller;
+import org.infinispan.commons.marshall.ProtoStreamMarshaller;
+import org.infinispan.protostream.SerializationContext;
+import org.infinispan.protostream.SerializationContextInitializer;
 
 import com.oracle.svm.core.annotate.Alias;
 import com.oracle.svm.core.annotate.Substitute;
@@ -25,7 +28,7 @@ public final class SubstituteRemoteCacheManager {
     @Substitute
     private void initRemoteCache(InternalRemoteCache<?, ?> remoteCache, OperationsFactory operationsFactory) {
         // Invoke the init method that doesn't have the JMX ObjectName argument
-        remoteCache.init(marshaller, operationsFactory, configuration);
+        remoteCache.init(operationsFactory, configuration);
     }
 
     @Substitute
@@ -34,6 +37,20 @@ public final class SubstituteRemoteCacheManager {
 
     @Substitute
     private void unregisterMBean() {
+    }
 
+    @Substitute
+    private void registerProtoStreamMarshaller() {
+    }
+
+    @Substitute
+    private void initializeProtoStreamMarshaller(ProtoStreamMarshaller protoMarshaller) {
+        SerializationContext ctx = protoMarshaller.getSerializationContext();
+
+        // Register the configured schemas.
+        for (SerializationContextInitializer sci : configuration.getContextInitializers()) {
+            sci.registerSchema(ctx);
+            sci.registerMarshallers(ctx);
+        }
     }
 }

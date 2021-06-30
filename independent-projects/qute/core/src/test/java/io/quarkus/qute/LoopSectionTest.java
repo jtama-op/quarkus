@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.fail;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -133,7 +134,8 @@ public class LoopSectionTest {
             engine.parse("{#for i in items}{i}:{/for}").data("items", null).render();
             fail();
         } catch (TemplateException expected) {
-            assertTrue(expected.getMessage().contains("[items] resolved to [null]"), expected.getMessage());
+            assertTrue(expected.getMessage().contains("{items} resolved to null, use {items.orEmpty} to ignore this error"),
+                    expected.getMessage());
         }
     }
 
@@ -144,7 +146,20 @@ public class LoopSectionTest {
             engine.parse("{#for i in items}{i}:{/for}").data("items", Boolean.TRUE).render();
             fail();
         } catch (TemplateException expected) {
-            assertTrue(expected.getMessage().contains("[items] resolved to [java.lang.Boolean]"), expected.getMessage());
+            assertTrue(expected.getMessage().contains("{items} resolved to [java.lang.Boolean] which is not iterable"),
+                    expected.getMessage());
+        }
+    }
+
+    @Test
+    public void testNotFound() {
+        Engine engine = Engine.builder().addDefaults().build();
+        try {
+            engine.parse("{#for i in items}{i}:{/for}").render();
+            fail();
+        } catch (TemplateException expected) {
+            assertTrue(expected.getMessage().contains("{items} not found, use {items.orEmpty} to ignore this error"),
+                    expected.getMessage());
         }
     }
 
@@ -168,6 +183,13 @@ public class LoopSectionTest {
         result = engine.parse("{#each dependencies}{#if it.version}<version>{version}</version>{/if}{/each}")
                 .render(data);
         assertTrue(result.contains("hellllllo"), result);
+    }
+
+    @Test
+    public void testElseBlock() {
+        Engine engine = Engine.builder().addDefaults().build();
+        assertEquals("No items.",
+                engine.parse("{#for i in items}{item}{#else}No items.{/for}").data("items", Collections.emptyList()).render());
     }
 
 }

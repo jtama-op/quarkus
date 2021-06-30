@@ -1,5 +1,5 @@
----
 name: "Funqy AWS Lambda Binding"
+artifact: ${project.groupId}:${project.artifactId}:${project.version}
 metadata:
   keywords:
   - "funqy"
@@ -11,4 +11,8 @@ metadata:
   categories:
   - "cloud"
   status: "experimental"
-  codestart: "funqy-amazon-lambda"
+  codestart:
+    name: "funqy-amazon-lambda"
+    kind: "example"
+    languages: "java"
+    artifact: "io.quarkus:quarkus-project-core-extension-codestarts"

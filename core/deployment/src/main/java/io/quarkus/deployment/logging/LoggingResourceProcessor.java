@@ -14,6 +14,7 @@ import java.util.stream.Collectors;
 import org.jboss.logmanager.EmbeddedConfigurator;
 import org.objectweb.asm.Opcodes;
 
+import io.quarkus.bootstrap.classloading.QuarkusClassLoader;
 import io.quarkus.bootstrap.logging.InitialConfigurator;
 import io.quarkus.deployment.GeneratedClassGizmoAdaptor;
 import io.quarkus.deployment.annotations.BuildProducer;
@@ -22,6 +23,7 @@ import io.quarkus.deployment.annotations.ExecutionTime;
 import io.quarkus.deployment.annotations.Record;
 import io.quarkus.deployment.builditem.ConsoleFormatterBannerBuildItem;
 import io.quarkus.deployment.builditem.GeneratedClassBuildItem;
+import io.quarkus.deployment.builditem.LaunchModeBuildItem;
 import io.quarkus.deployment.builditem.LogCategoryBuildItem;
 import io.quarkus.deployment.builditem.LogConsoleFormatBuildItem;
 import io.quarkus.deployment.builditem.LogHandlerBuildItem;
@@ -33,7 +35,7 @@ import io.quarkus.deployment.builditem.nativeimage.RuntimeInitializedClassBuildI
 import io.quarkus.deployment.builditem.nativeimage.ServiceProviderBuildItem;
 import io.quarkus.deployment.metrics.MetricsCapabilityBuildItem;
 import io.quarkus.deployment.metrics.MetricsFactoryConsumerBuildItem;
-import io.quarkus.deployment.pkg.steps.NativeBuild;
+import io.quarkus.deployment.pkg.steps.NativeOrNativeSourcesBuild;
 import io.quarkus.gizmo.AnnotationCreator;
 import io.quarkus.gizmo.BranchResult;
 import io.quarkus.gizmo.BytecodeCreator;
@@ -45,9 +47,12 @@ import io.quarkus.gizmo.MethodCreator;
 import io.quarkus.gizmo.MethodDescriptor;
 import io.quarkus.gizmo.ResultHandle;
 import io.quarkus.runtime.RuntimeValue;
+import io.quarkus.runtime.configuration.ConfigInstantiator;
 import io.quarkus.runtime.logging.CategoryBuildTimeConfig;
+import io.quarkus.runtime.logging.CleanupFilterConfig;
 import io.quarkus.runtime.logging.InheritableLevel;
 import io.quarkus.runtime.logging.LogBuildTimeConfig;
+import io.quarkus.runtime.logging.LogCleanupFilterElement;
 import io.quarkus.runtime.logging.LogConfig;
 import io.quarkus.runtime.logging.LogMetricsHandlerRecorder;
 import io.quarkus.runtime.logging.LoggingSetupRecorder;
@@ -124,31 +129,54 @@ public final class LoggingResourceProcessor {
     LoggingSetupBuildItem setupLoggingRuntimeInit(LoggingSetupRecorder recorder, LogConfig log, LogBuildTimeConfig buildLog,
             List<LogHandlerBuildItem> handlerBuildItems,
             List<NamedLogHandlersBuildItem> namedHandlerBuildItems, List<LogConsoleFormatBuildItem> consoleFormatItems,
-            Optional<ConsoleFormatterBannerBuildItem> possibleBannerBuildItem) {
-        final List<RuntimeValue<Optional<Handler>>> handlers = handlerBuildItems.stream()
-                .map(LogHandlerBuildItem::getHandlerValue)
-                .collect(Collectors.toList());
-        final List<RuntimeValue<Map<String, Handler>>> namedHandlers = namedHandlerBuildItems.stream()
-                .map(NamedLogHandlersBuildItem::getNamedHandlersMap).collect(Collectors.toList());
+            Optional<ConsoleFormatterBannerBuildItem> possibleBannerBuildItem,
+            LaunchModeBuildItem launchModeBuildItem,
+            List<LogCleanupFilterBuildItem> logCleanupFilters) {
+        if (!launchModeBuildItem.isAuxiliaryApplication()) {
+            final List<RuntimeValue<Optional<Handler>>> handlers = handlerBuildItems.stream()
+                    .map(LogHandlerBuildItem::getHandlerValue)
+                    .collect(Collectors.toList());
+            final List<RuntimeValue<Map<String, Handler>>> namedHandlers = namedHandlerBuildItems.stream()
+                    .map(NamedLogHandlersBuildItem::getNamedHandlersMap).collect(Collectors.toList());
 
-        ConsoleFormatterBannerBuildItem bannerBuildItem = null;
-        RuntimeValue<Optional<Supplier<String>>> possibleSupplier = null;
-        if (possibleBannerBuildItem.isPresent()) {
-            bannerBuildItem = possibleBannerBuildItem.get();
+            ConsoleFormatterBannerBuildItem bannerBuildItem = null;
+            RuntimeValue<Optional<Supplier<String>>> possibleSupplier = null;
+            if (possibleBannerBuildItem.isPresent()) {
+                bannerBuildItem = possibleBannerBuildItem.get();
+            }
+            if (bannerBuildItem != null) {
+                possibleSupplier = bannerBuildItem.getBannerSupplier();
+            }
+            recorder.initializeLogging(log, buildLog, handlers, namedHandlers,
+                    consoleFormatItems.stream().map(LogConsoleFormatBuildItem::getFormatterValue).collect(Collectors.toList()),
+                    possibleSupplier);
+            LogConfig logConfig = new LogConfig();
+            ConfigInstantiator.handleObject(logConfig);
+            for (LogCleanupFilterBuildItem i : logCleanupFilters) {
+                CleanupFilterConfig value = new CleanupFilterConfig();
+                LogCleanupFilterElement filterElement = i.getFilterElement();
+                value.ifStartsWith = filterElement.getMessageStarts();
+                value.targetLevel = filterElement.getTargetLevel() == null ? org.jboss.logmanager.Level.DEBUG
+                        : filterElement.getTargetLevel();
+                logConfig.filters.put(filterElement.getLoggerName(), value);
+            }
+            LoggingSetupRecorder.initializeBuildTimeLogging(logConfig, buildLog);
+            ((QuarkusClassLoader) Thread.currentThread().getContextClassLoader()).addCloseTask(new Runnable() {
+                @Override
+                public void run() {
+                    InitialConfigurator.DELAYED_HANDLER.buildTimeComplete();
+                }
+            });
         }
-        if (bannerBuildItem != null) {
-            possibleSupplier = bannerBuildItem.getBannerSupplier();
-        }
-        recorder.initializeLogging(log, buildLog, handlers, namedHandlers,
-                consoleFormatItems.stream().map(LogConsoleFormatBuildItem::getFormatterValue).collect(Collectors.toList()),
-                possibleSupplier);
         return new LoggingSetupBuildItem();
     }
 
     @BuildStep
     @Record(ExecutionTime.STATIC_INIT)
-    void setupLoggingStaticInit(LoggingSetupRecorder recorder) {
-        recorder.initializeLoggingForImageBuild();
+    void setupLoggingStaticInit(LoggingSetupRecorder recorder, LaunchModeBuildItem launchModeBuildItem) {
+        if (!launchModeBuildItem.isAuxiliaryApplication()) {
+            recorder.initializeLoggingForImageBuild();
+        }
     }
 
     // This is specifically to help out with presentations, to allow an env var to always override this value
@@ -169,7 +197,7 @@ public final class LoggingResourceProcessor {
         }
     }
 
-    @BuildStep(onlyIf = NativeBuild.class)
+    @BuildStep(onlyIf = NativeOrNativeSourcesBuild.class)
     void setUpMinLevelLogging(LogBuildTimeConfig log,
             final BuildProducer<GeneratedClassBuildItem> generatedTraceLogger) {
         ClassOutput output = new GeneratedClassGizmoAdaptor(generatedTraceLogger, false);

@@ -4,6 +4,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.function.Function;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.jboss.jandex.ArrayType;
 import org.jboss.jandex.ClassInfo;
@@ -84,7 +86,7 @@ final class TypeInfos {
                 typeInfo = typeInfo.substring(0, typeInfo.indexOf(LEFT_ANGLE));
             }
             if (part.isVirtualMethod() || Expressions.isVirtualMethod(typeInfo)) {
-                return new VirtualMethodInfo(typeInfo, part.asVirtualMethod());
+                return new VirtualMethodInfo(typeInfo, part.asVirtualMethod(), hint);
             }
             return new PropertyInfo(typeInfo, part, hint);
         }
@@ -189,6 +191,10 @@ final class TypeInfos {
             return false;
         }
 
+        boolean hasHints() {
+            return false;
+        }
+
         VirtualMethodInfo asVirtualMethod() {
             throw new IllegalArgumentException("Not a virtual method");
         }
@@ -201,6 +207,10 @@ final class TypeInfos {
             throw new IllegalArgumentException("Not a type info: " + getClass().getName() + ":" + toString());
         }
 
+        HintInfo asHintInfo() {
+            throw new IllegalArgumentException("Not a hint info");
+        }
+
         @Override
         public String toString() {
             return value;
@@ -210,11 +220,32 @@ final class TypeInfos {
 
     static abstract class HintInfo extends Info {
 
-        final String hint;
+        static final Pattern HINT_PATTERN = Pattern.compile("\\<[a-zA-Z_0-9#-]+\\>");
 
-        public HintInfo(String value, Expression.Part part, String hint) {
+        // <loop#1>, <set#10><loop-element>, etc.
+        final List<String> hints;
+
+        HintInfo(String value, Expression.Part part, String hintStr) {
             super(value, part);
-            this.hint = hint;
+            if (hintStr != null) {
+                List<String> found = new ArrayList<>();
+                Matcher m = HINT_PATTERN.matcher(hintStr);
+                while (m.find()) {
+                    found.add(m.group());
+                }
+                this.hints = found;
+            } else {
+                this.hints = Collections.emptyList();
+            }
+        }
+
+        boolean hasHints() {
+            return !hints.isEmpty();
+        }
+
+        @Override
+        HintInfo asHintInfo() {
+            return this;
         }
 
     }
@@ -224,7 +255,7 @@ final class TypeInfos {
         final Type resolvedType;
         final ClassInfo rawClass;
 
-        public TypeInfo(String value, Expression.Part part, String hint, Type resolvedType, ClassInfo rawClass) {
+        TypeInfo(String value, Expression.Part part, String hint, Type resolvedType, ClassInfo rawClass) {
             super(value, part, hint);
             this.resolvedType = resolvedType;
             this.rawClass = rawClass;
@@ -246,7 +277,7 @@ final class TypeInfos {
 
         final String name;
 
-        public PropertyInfo(String name, Expression.Part part, String hint) {
+        PropertyInfo(String name, Expression.Part part, String hint) {
             super(name, part, hint);
             this.name = name;
         }
@@ -263,12 +294,12 @@ final class TypeInfos {
 
     }
 
-    static class VirtualMethodInfo extends Info {
+    static class VirtualMethodInfo extends HintInfo {
 
         final String name;
 
-        public VirtualMethodInfo(String value, Expression.VirtualMethodPart part) {
-            super(value, part);
+        VirtualMethodInfo(String value, Expression.VirtualMethodPart part, String hint) {
+            super(value, part, hint);
             this.name = part.getName();
         }
 

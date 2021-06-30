@@ -2,6 +2,7 @@ package io.quarkus.hibernate.orm.panache.common.runtime;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Parameter;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -18,6 +19,7 @@ import org.hibernate.Filter;
 import org.hibernate.Session;
 import org.hibernate.engine.spi.RowSelection;
 
+import io.quarkus.hibernate.orm.panache.ProjectedFieldName;
 import io.quarkus.panache.common.Page;
 import io.quarkus.panache.common.Range;
 import io.quarkus.panache.common.exception.PanacheQueryException;
@@ -90,16 +92,24 @@ public class CommonPanacheQueryImpl<Entity> {
         StringBuilder select = new StringBuilder("SELECT new ").append(type.getName()).append(" (");
         int selectInitialLength = select.length();
         for (Parameter parameter : constructor.getParameters()) {
-            if (!parameter.isNamePresent()) {
+            String parameterName;
+            if (parameter.isAnnotationPresent(ProjectedFieldName.class)) {
+                final String name = parameter.getAnnotation(ProjectedFieldName.class).value();
+                if (name.isEmpty())
+                    throw new PanacheQueryException("The annotation ProjectedFieldName must have a non-empty value.");
+                parameterName = name;
+            } else if (!parameter.isNamePresent()) {
                 throw new PanacheQueryException(
                         "Your application must be built with parameter names, this should be the default if" +
                                 " using Quarkus artifacts. Check the maven or gradle compiler configuration to include '-parameters'.");
+            } else {
+                parameterName = parameter.getName();
             }
 
             if (select.length() > selectInitialLength) {
                 select.append(", ");
             }
-            select.append(parameter.getName());
+            select.append(parameterName);
         }
         select.append(") ");
 
@@ -347,7 +357,13 @@ public class CommonPanacheQueryImpl<Entity> {
         for (Entry<String, Map<String, Object>> entry : filters.entrySet()) {
             Filter filter = session.enableFilter(entry.getKey());
             for (Entry<String, Object> paramEntry : entry.getValue().entrySet()) {
-                filter.setParameter(paramEntry.getKey(), paramEntry.getValue());
+                if (paramEntry.getValue() instanceof Collection<?>) {
+                    filter.setParameterList(paramEntry.getKey(), (Collection<?>) paramEntry.getValue());
+                } else if (paramEntry.getValue() instanceof Object[]) {
+                    filter.setParameterList(paramEntry.getKey(), (Object[]) paramEntry.getValue());
+                } else {
+                    filter.setParameter(paramEntry.getKey(), paramEntry.getValue());
+                }
             }
             filter.validate();
         }

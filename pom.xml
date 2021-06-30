@@ -6,7 +6,7 @@
     <parent>
         <groupId>org.jboss</groupId>
         <artifactId>jboss-parent</artifactId>
-        <version>37</version>
+        <version>38</version>
     </parent>
 
     <groupId>io.quarkus</groupId>
@@ -14,6 +14,18 @@
     <name>Quarkus - Parent pom</name>
     <version>999-SNAPSHOT</version>
     <packaging>pom</packaging>
+
+    <description>Quarkus - Kubernetes Native Java stack tailored for OpenJDK HotSpot and GraalVM</description>
+    <url>https://github.com/quarkusio/quarkus</url>
+
+    <developers>
+        <developer>
+            <id>quarkus</id>
+            <name>Quarkus Community</name>
+            <organization>Quarkus</organization>
+            <organizationUrl>https://quarkus.io</organizationUrl>
+        </developer>
+    </developers>
 
     <licenses>
         <license>
@@ -30,18 +42,27 @@
         <tag>HEAD</tag>
     </scm>
 
+    <issueManagement>
+        <system>GitHub</system>
+        <url>https://github.com/quarkusio/quarkus/issues/</url>
+    </issueManagement>
+
     <properties>
+        <maven.compiler.target>11</maven.compiler.target>
+        <maven.compiler.source>11</maven.compiler.source>
+        <maven.compiler.release>11</maven.compiler.release>
+        <maven.compiler.parameters>true</maven.compiler.parameters>
+
         <graalvmHome>${env.GRAALVM_HOME}</graalvmHome>
         <postgres.url>jdbc:postgresql:hibernate_orm_test</postgres.url>
 
         <nexus-staging-maven-plugin.version>1.6.8</nexus-staging-maven-plugin.version>
+        <gitflow-incremental-builder.version>3.14.3</gitflow-incremental-builder.version>
+        <quarkus-platform-bom-plugin.version>0.0.10</quarkus-platform-bom-plugin.version>
 
         <skipDocs>false</skipDocs>
         <skip.gradle.tests>false</skip.gradle.tests>
 
-        <sonar.projectKey>quarkusio_quarkus</sonar.projectKey>
-        <sonar.organization>quarkusio</sonar.organization>
-        <sonar.host.url>https://sonarcloud.io</sonar.host.url>
     </properties>
 
     <modules>
@@ -95,13 +116,25 @@
     <distributionManagement>
         <snapshotRepository>
             <id>sonatype-nexus-snapshots</id>
-            <url>https://oss.sonatype.org/content/repositories/snapshots</url>
+            <url>https://s01.oss.sonatype.org/content/repositories/snapshots</url>
         </snapshotRepository>
         <repository>
             <id>sonatype-nexus-release</id>
-            <url>https://oss.sonatype.org/service/local/staging/deploy/maven2/</url>
+            <url>https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/</url>
         </repository>
     </distributionManagement>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>io.quarkus</groupId>
+                    <artifactId>quarkus-platform-bom-maven-plugin</artifactId>
+                    <version>${quarkus-platform-bom-plugin.version}</version>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+    </build>
 
     <profiles>
         <profile>
@@ -117,11 +150,12 @@
                 <skipITs>true</skipITs>
                 <skipDocs>true</skipDocs>
                 <enforcer.skip>true</enforcer.skip>
-                <format.skip>true</format.skip>
                 <skipExtensionValidation>true</skipExtensionValidation>
                 <skip.gradle.tests>true</skip.gradle.tests>
                 <invoker.skip>true</invoker.skip>   <!-- maven-invoker-plugin -->
                 <jbang.skip>true</jbang.skip> <!-- jbang-maven-plugin -->
+                <forbiddenapis.skip>true</forbiddenapis.skip> <!-- forbidden-apis maven plugin -->
+                <skipCodestartValidation>true</skipCodestartValidation>
             </properties>
             <build>
                 <defaultGoal>clean install</defaultGoal>
@@ -145,6 +179,7 @@
                 <skip.gradle.tests>true</skip.gradle.tests>
                 <invoker.skip>true</invoker.skip>   <!-- maven-invoker-plugin -->
                 <jbang.skip>true</jbang.skip> <!-- jbang-maven-plugin -->
+                <forbiddenapis.skip>true</forbiddenapis.skip> <!-- forbidden-apis maven plugin -->
             </properties>
         </profile>
         <profile>
@@ -227,6 +262,43 @@
             <modules>
                 <module>tcks</module>
             </modules>
+        </profile>
+        <profile>
+            <id>incremental</id>
+            <activation>
+                <property>
+                    <name>incremental</name>
+                </property>
+            </activation>
+            <properties>
+                <!-- the *local* main, not refs/remotes/... -->
+                <gib.referenceBranch>main</gib.referenceBranch>
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>com.vackosar.gitflowincrementalbuilder</groupId>
+                        <artifactId>gitflow-incremental-builder</artifactId>
+                        <version>${gitflow-incremental-builder.version}</version>
+                        <extensions>true</extensions>
+                        <!-- https://github.com/gitflow-incremental-builder/gitflow-incremental-builder#configuration
+                             General recap: Anything that is directly set in <configuration> cannot be redefined via '-D...'!
+                             See also: https://github.com/gitflow-incremental-builder/gitflow-incremental-builder/issues/213 -->
+                        <configuration>
+                            <!-- pointless to attempt incremental build if something like mvnw was changed
+                                 (and also potentially wrong, given that independent-projects might not be built) -->
+                            <skipIfPathMatches>\.github[/\\].*|\.mvn[/\\].*|mvnw.*</skipIfPathMatches>
+                            <!-- Note: *Upstream* is only relevant in case of:
+                                 -am or
+                                 -Dgib.buildUpstream=always|true or
+                                 -Dgib.buildAll=true or
+                                 -Dgib.forceBuildModules=... -->
+                            <skipTestsForUpstreamModules>true</skipTestsForUpstreamModules>
+                            <argsForUpstreamModules>skipITs invoker.skip no-format</argsForUpstreamModules>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
         </profile>
     </profiles>
 

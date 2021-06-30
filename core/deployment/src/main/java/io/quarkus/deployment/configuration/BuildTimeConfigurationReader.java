@@ -24,6 +24,7 @@ import java.util.SortedSet;
 import java.util.TreeMap;
 
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.eclipse.microprofile.config.spi.ConfigSource;
 import org.eclipse.microprofile.config.spi.Converter;
 import org.jboss.logging.Logger;
 import org.wildfly.common.Assert;
@@ -53,8 +54,10 @@ import io.quarkus.runtime.configuration.ConfigUtils;
 import io.quarkus.runtime.configuration.HyphenateEnumConverter;
 import io.quarkus.runtime.configuration.NameIterator;
 import io.smallrye.config.Converters;
+import io.smallrye.config.EnvConfigSource;
 import io.smallrye.config.Expressions;
 import io.smallrye.config.SmallRyeConfig;
+import io.smallrye.config.SmallRyeConfigBuilder;
 
 /**
  * A configuration reader.
@@ -295,7 +298,12 @@ public final class BuildTimeConfigurationReader {
                 nameBuilder.setLength(len);
             }
             // sweep-up
-            for (String propertyName : config.getPropertyNames()) {
+            SmallRyeConfig runtimeDefaultsConfig = getConfigForRuntimeDefaults();
+            for (String propertyName : getAllProperties()) {
+                if (propertyName.equals(ConfigSource.CONFIG_ORDINAL)) {
+                    continue;
+                }
+
                 NameIterator ni = new NameIterator(propertyName);
                 if (ni.hasNext() && ni.nextSegmentEquals("quarkus")) {
                     ni.next();
@@ -375,12 +383,12 @@ public final class BuildTimeConfigurationReader {
                     if (matched != null) {
                         // it's a specified run-time default (record for later)
                         specifiedRunTimeDefaultValues.put(propertyName, Expressions.withoutExpansion(
-                                () -> config.getOptionalValue(propertyName, String.class).orElse("")));
+                                () -> runtimeDefaultsConfig.getOptionalValue(propertyName, String.class).orElse("")));
                     }
                 } else {
                     // it's not managed by us; record it
                     specifiedRunTimeDefaultValues.put(propertyName, Expressions.withoutExpansion(
-                            () -> config.getOptionalValue(propertyName, String.class).orElse("")));
+                            () -> runtimeDefaultsConfig.getOptionalValue(propertyName, String.class).orElse("")));
                 }
             }
             return new ReadResult(objectsByRootClass, specifiedRunTimeDefaultValues, buildTimeRunTimeVisibleValues,
@@ -674,7 +682,7 @@ public final class BuildTimeConfigurationReader {
                         throw toError(e);
                     }
                 } else {
-                    converter = config.getConverter(leaf.getLeafType());
+                    converter = config.requireConverter(leaf.getLeafType());
                 }
             } else if (valueType instanceof LowerBoundCheckOf) {
                 // todo: add in bounds checker
@@ -712,6 +720,44 @@ public final class BuildTimeConfigurationReader {
             }
             convByType.put(valueType, converter);
             return converter;
+        }
+
+        /**
+         * We collect all properties from ConfigSources, because Config#getPropertyNames exclude the active profiled
+         * properties, meaning that the property is written in the default config source unprofiled. This may cause
+         * issues if we run with a different profile and fallback to defaults.
+         */
+        private Set<String> getAllProperties() {
+            Set<String> properties = new HashSet<>();
+            for (ConfigSource configSource : config.getConfigSources()) {
+                properties.addAll(configSource.getPropertyNames());
+            }
+            for (String propertyName : config.getPropertyNames()) {
+                properties.add(propertyName);
+            }
+            return properties;
+        }
+
+        /**
+         * Use this Config instance to record the specified runtime default values. We cannot use the main Config
+         * instance because it may record values coming from the EnvSource in build time. We do exclude the properties
+         * coming from the EnvSource, but a call to getValue may still provide values coming from the EnvSource, so we
+         * need to exclude it from sources when recoding values.
+         *
+         * We also do not want to completely exclude the EnvSource, because it may provide values for the build. This
+         * is only specific when recording the defaults.
+         *
+         * @return a new SmallRye instance without the EnvSources.
+         */
+        private SmallRyeConfig getConfigForRuntimeDefaults() {
+            SmallRyeConfigBuilder builder = ConfigUtils.emptyConfigBuilder();
+            for (ConfigSource configSource : config.getConfigSources()) {
+                if (configSource instanceof EnvConfigSource) {
+                    continue;
+                }
+                builder.withSources(configSource);
+            }
+            return builder.build();
         }
     }
 

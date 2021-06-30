@@ -1,15 +1,11 @@
 package io.quarkus.it.keycloak;
 
-import static org.awaitility.Awaitility.await;
 import static org.hamcrest.Matchers.equalTo;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 import java.io.IOException;
-import java.time.Duration;
-import java.util.concurrent.Callable;
-import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.Test;
 import org.keycloak.representations.AccessTokenResponse;
@@ -23,7 +19,6 @@ import com.gargoylesoftware.htmlunit.util.Cookie;
 import io.quarkus.test.common.QuarkusTestResource;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.RestAssured;
-import io.restassured.response.Response;
 import io.vertx.core.json.JsonObject;
 
 /**
@@ -162,6 +157,27 @@ public class BearerTokenAuthorizationTest {
     }
 
     @Test
+    public void testTenantBAllClients() {
+        RestAssured.given().auth().oauth2(getAccessToken("alice", "b"))
+                .when().get("/tenant/tenant-b2/api/user")
+                .then()
+                .statusCode(200)
+                .body(equalTo("tenant-b2:alice"));
+
+        RestAssured.given().auth().oauth2(getAccessToken("alice", "b", "b2"))
+                .when().get("/tenant/tenant-b2/api/user")
+                .then()
+                .statusCode(200)
+                .body(equalTo("tenant-b2:alice"));
+
+        // should give a 401 given that access token from issuer c can not access tenant b
+        RestAssured.given().auth().oauth2(getAccessToken("alice", "c"))
+                .when().get("/tenant/tenant-b2/api/user")
+                .then()
+                .statusCode(401);
+    }
+
+    @Test
     public void testResolveTenantIdentifier() {
         RestAssured.given().auth().oauth2(getAccessToken("alice", "b"))
                 .when().get("/tenant/tenant-b/api/user")
@@ -247,23 +263,11 @@ public class BearerTokenAuthorizationTest {
     @Test
     public void testSimpleOidcJwtWithJwkRefresh() {
         RestAssured.when().post("/oidc/jwk-endpoint-call-count").then().body(equalTo("0"));
-        RestAssured.when().get("/oidc/introspection-status").then().body(equalTo("false"));
-        RestAssured.when().get("/oidc/rotate-status").then().body(equalTo("false"));
+        RestAssured.when().post("/oidc/introspection-endpoint-call-count").then().body(equalTo("0"));
+        RestAssured.when().post("/oidc/disable-introspection").then().body(equalTo("false"));
         // Quarkus OIDC is initialized with JWK set with kid '1' as part of the discovery process
         // Now enable the rotation
-        RestAssured.when().post("/oidc/rotate").then().body(equalTo("true"));
-
-        // OIDC server will have a refreshed JWK set with kid '2', 200 is expected even though the introspection fallback is disabled.
-        await().atMost(5, TimeUnit.SECONDS)
-                .pollInterval(Duration.ofSeconds(1))
-                .until(new Callable<Boolean>() {
-                    @Override
-                    public Boolean call() throws Exception {
-                        Response r = RestAssured.given().auth().oauth2(getAccessTokenFromSimpleOidc("2"))
-                                .when().get("/tenant/tenant-oidc/api/user");
-                        return r.getStatusCode() == 200;
-                    }
-                });
+        RestAssured.when().post("/oidc/enable-rotate").then().body(equalTo("true"));
 
         // JWK is available now in Quarkus OIDC, confirm that no timeout is needed 
         RestAssured.given().auth().oauth2(getAccessTokenFromSimpleOidc("2"))
@@ -280,7 +284,7 @@ public class BearerTokenAuthorizationTest {
                 .statusCode(401);
 
         // Enable introspection
-        RestAssured.when().post("/oidc/introspection").then().body(equalTo("true"));
+        RestAssured.when().post("/oidc/enable-introspection").then().body(equalTo("true"));
         // No timeout is required
         RestAssured.given().auth().oauth2(getAccessTokenFromSimpleOidc("3"))
                 .when().get("/tenant/tenant-oidc/api/user")
@@ -293,19 +297,71 @@ public class BearerTokenAuthorizationTest {
                 .when().get("/tenant-opaque/tenant-oidc/api/user")
                 .then()
                 .statusCode(200)
-                .body(equalTo("tenant-oidc-opaque:alice"));
+                .body(equalTo("tenant-oidc-opaque:alice:user:user@gmail.com"));
 
-        // OIDC JWK endpoint must've been called only twice, once as part of the Quarkus OIDC/Vertx Auth initialization
+        // OIDC JWK endpoint must've been called only twice, once as part of the Quarkus OIDC initialization
         // and once during the 1st request with a token kid '2', follow up requests must've been blocked due to the interval
         // restrictions
         RestAssured.when().get("/oidc/jwk-endpoint-call-count").then().body(equalTo("2"));
+        // both requests with kid `3` and with the opaque token required the remote introspection
+        RestAssured.when().get("/oidc/introspection-endpoint-call-count").then().body(equalTo("3"));
+        RestAssured.when().post("/oidc/disable-rotate").then().body(equalTo("false"));
+    }
+
+    @Test
+    public void testJwtTokenIntrospectionDisallowed() {
+        RestAssured.when().post("/oidc/jwk-endpoint-call-count").then().body(equalTo("0"));
+        RestAssured.when().post("/oidc/introspection-endpoint-call-count").then().body(equalTo("0"));
+        RestAssured.when().post("/oidc/disable-introspection").then().body(equalTo("false"));
+        // Quarkus OIDC is initialized with JWK set with kid '1' as part of the discovery process
+        // Now enable the rotation
+        RestAssured.when().post("/oidc/enable-rotate").then().body(equalTo("true"));
+
+        // JWK is available now in Quarkus OIDC, confirm that no timeout is needed 
+        RestAssured.given().auth().oauth2(getAccessTokenFromSimpleOidc("2"))
+                .when().get("/tenant/tenant-oidc-no-introspection/api/user")
+                .then()
+                .statusCode(200)
+                .body(equalTo("tenant-oidc-no-introspection:alice"));
+
+        // Enable OIDC introspection endpoint
+        RestAssured.when().post("/oidc/enable-introspection").then().body(equalTo("true"));
+        RestAssured.given().auth().oauth2(getAccessTokenFromSimpleOidc("3"))
+                .when().get("/tenant/tenant-oidc-no-introspection/api/user")
+                .then()
+                .statusCode(401);
+
+        // OIDC JWK endpoint must've been called only twice, once as part of the Quarkus OIDC initialization
+        // and once during the 1st request with a token kid '2', follow up requests must've been blocked due to the interval
+        // restrictions
+        RestAssured.when().get("/oidc/jwk-endpoint-call-count").then().body(equalTo("2"));
+        // JWT introspection is disallowed
+        RestAssured.when().get("/oidc/introspection-endpoint-call-count").then().body(equalTo("0"));
+        RestAssured.when().post("/oidc/disable-rotate").then().body(equalTo("false"));
+    }
+
+    @Test
+    public void testJwtTokenIntrospectionOnly() {
+        RestAssured.when().post("/oidc/jwk-endpoint-call-count").then().body(equalTo("0"));
+        RestAssured.when().post("/oidc/introspection-endpoint-call-count").then().body(equalTo("0"));
+        RestAssured.when().post("/oidc/enable-introspection").then().body(equalTo("true"));
+
+        // JWK is available now in Quarkus OIDC, confirm that no timeout is needed 
+        RestAssured.given().auth().oauth2(getAccessTokenFromSimpleOidc("2"))
+                .when().get("/tenant/tenant-oidc-introspection-only/api/user")
+                .then()
+                .statusCode(200)
+                .body(equalTo("tenant-oidc-introspection-only:alice"));
+
+        RestAssured.when().get("/oidc/jwk-endpoint-call-count").then().body(equalTo("0"));
+        RestAssured.when().get("/oidc/introspection-endpoint-call-count").then().body(equalTo("1"));
     }
 
     @Test
     public void testSimpleOidcNoDiscovery() {
         RestAssured.when().post("/oidc/jwk-endpoint-call-count").then().body(equalTo("0"));
-        RestAssured.when().get("/oidc/introspection-status").then().body(equalTo("false"));
-        RestAssured.when().get("/oidc/rotate-status").then().body(equalTo("false"));
+        RestAssured.when().post("/oidc/disable-introspection").then().body(equalTo("false"));
+        RestAssured.when().post("/oidc/disable-rotate").then().body(equalTo("false"));
 
         // Quarkus OIDC is initialized with JWK set with kid '1' as part of the initialization process
         RestAssured.given().auth().oauth2(getAccessTokenFromSimpleOidc("1"))
@@ -314,6 +370,21 @@ public class BearerTokenAuthorizationTest {
                 .statusCode(200)
                 .body(equalTo("tenant-oidc-no-discovery:alice"));
         RestAssured.when().get("/oidc/jwk-endpoint-call-count").then().body(equalTo("1"));
+        RestAssured.when().get("/oidc/introspection-endpoint-call-count").then().body(equalTo("0"));
+    }
+
+    @Test
+    public void testOpaqueTokenIntrospectionDisallowed() {
+        RestAssured.when().post("/oidc/introspection-endpoint-call-count").then().body(equalTo("0"));
+
+        // Verify the the opaque token is rejected with 401 
+        RestAssured.given().auth().oauth2(getOpaqueAccessTokenFromSimpleOidc())
+                .when().get("/tenant-opaque/tenant-oidc-no-opaque-token/api/user")
+                .then()
+                .statusCode(401);
+
+        // Confirm no introspection request has been made
+        RestAssured.when().get("/oidc/introspection-endpoint-call-count").then().body(equalTo("0"));
     }
 
     @Test
@@ -334,6 +405,10 @@ public class BearerTokenAuthorizationTest {
     }
 
     private String getAccessToken(String userName, String clientId) {
+        return getAccessToken(userName, clientId, clientId);
+    }
+
+    private String getAccessToken(String userName, String realmId, String clientId) {
         return RestAssured
                 .given()
                 .param("grant_type", "password")
@@ -342,7 +417,7 @@ public class BearerTokenAuthorizationTest {
                 .param("client_id", "quarkus-app-" + clientId)
                 .param("client_secret", "secret")
                 .when()
-                .post(KEYCLOAK_SERVER_URL + "/realms/" + KEYCLOAK_REALM + clientId + "/protocol/openid-connect/token")
+                .post(KEYCLOAK_SERVER_URL + "/realms/" + KEYCLOAK_REALM + realmId + "/protocol/openid-connect/token")
                 .as(AccessTokenResponse.class).getToken();
     }
 

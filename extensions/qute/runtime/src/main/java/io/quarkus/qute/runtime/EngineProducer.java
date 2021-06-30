@@ -3,8 +3,9 @@ package io.quarkus.qute.runtime;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.Reader;
+import java.lang.reflect.InvocationTargetException;
 import java.net.URL;
-import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
 
@@ -24,13 +25,14 @@ import io.quarkus.qute.HtmlEscaper;
 import io.quarkus.qute.NamespaceResolver;
 import io.quarkus.qute.ReflectionValueResolver;
 import io.quarkus.qute.Resolver;
-import io.quarkus.qute.Results.Result;
+import io.quarkus.qute.Results;
 import io.quarkus.qute.TemplateLocator.TemplateLocation;
 import io.quarkus.qute.UserTagSectionHelper;
 import io.quarkus.qute.ValueResolver;
 import io.quarkus.qute.ValueResolvers;
 import io.quarkus.qute.Variant;
 import io.quarkus.qute.runtime.QuteRecorder.QuteContext;
+import io.quarkus.runtime.LaunchMode;
 import io.quarkus.runtime.Startup;
 
 @Startup(Interceptor.Priority.PLATFORM_BEFORE)
@@ -51,7 +53,7 @@ public class EngineProducer {
     private final String tagPath;
 
     public EngineProducer(QuteContext context, QuteConfig config, QuteRuntimeConfig runtimeConfig,
-            Event<EngineBuilder> builderReady, Event<Engine> engineReady, ContentTypes contentTypes) {
+            Event<EngineBuilder> builderReady, Event<Engine> engineReady, ContentTypes contentTypes, LaunchMode launchMode) {
         this.contentTypes = contentTypes;
         this.suffixes = config.suffixes;
         this.basePath = "templates/";
@@ -81,19 +83,26 @@ public class EngineProducer {
         builder.addValueResolver(ValueResolvers.arrayResolver());
 
         // If needed use a specific result mapper for the selected strategy  
-        switch (runtimeConfig.propertyNotFoundStrategy) {
-            case THROW_EXCEPTION:
+        if (runtimeConfig.propertyNotFoundStrategy.isPresent()) {
+            switch (runtimeConfig.propertyNotFoundStrategy.get()) {
+                case THROW_EXCEPTION:
+                    builder.addResultMapper(new PropertyNotFoundThrowException());
+                    break;
+                case NOOP:
+                    builder.addResultMapper(new PropertyNotFoundNoop());
+                    break;
+                case OUTPUT_ORIGINAL:
+                    builder.addResultMapper(new PropertyNotFoundOutputOriginal());
+                    break;
+                default:
+                    // Use the default strategy
+                    break;
+            }
+        } else {
+            // Throw an expection in the development mode
+            if (launchMode == LaunchMode.DEVELOPMENT) {
                 builder.addResultMapper(new PropertyNotFoundThrowException());
-                break;
-            case NOOP:
-                builder.addResultMapper(new PropertyNotFoundNoop());
-                break;
-            case OUTPUT_ORIGINAL:
-                builder.addResultMapper(new PropertyNotFoundOutputOriginal());
-                break;
-            default:
-                // Use the default strategy
-                break;
+            }
         }
 
         // Escape some characters for HTML templates
@@ -111,7 +120,7 @@ public class EngineProducer {
         // Resolve @Named beans
         builder.addNamespaceResolver(NamespaceResolver.builder(INJECT_NAMESPACE).resolve(ctx -> {
             InstanceHandle<Object> bean = Arc.container().instance(ctx.getName());
-            return bean.isAvailable() ? bean.get() : Result.NOT_FOUND;
+            return bean.isAvailable() ? bean.get() : Results.NotFound.from(ctx);
         }).build());
 
         // Add generated resolvers
@@ -162,10 +171,11 @@ public class EngineProducer {
             Class<?> resolverClazz = Thread.currentThread()
                     .getContextClassLoader().loadClass(resolverClassName);
             if (Resolver.class.isAssignableFrom(resolverClazz)) {
-                return (Resolver) resolverClazz.newInstance();
+                return (Resolver) resolverClazz.getDeclaredConstructor().newInstance();
             }
             throw new IllegalStateException("Not a resolver: " + resolverClassName);
-        } catch (InstantiationException | IllegalAccessException | ClassNotFoundException e) {
+        } catch (InstantiationException | IllegalAccessException | ClassNotFoundException | IllegalArgumentException
+                | InvocationTargetException | NoSuchMethodException | SecurityException e) {
             throw new IllegalStateException("Unable to create resolver: " + resolverClassName, e);
         }
     }
@@ -221,7 +231,7 @@ public class EngineProducer {
         @Override
         public Reader read() {
             try {
-                return new InputStreamReader(resource.openStream(), Charset.forName("utf-8"));
+                return new InputStreamReader(resource.openStream(), StandardCharsets.UTF_8);
             } catch (IOException e) {
                 return null;
             }

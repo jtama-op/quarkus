@@ -1,5 +1,8 @@
 package io.quarkus.deployment.index;
 
+import static io.quarkus.bootstrap.classloading.JarClassPathElement.JAVA_VERSION;
+import static io.quarkus.bootstrap.classloading.JarClassPathElement.META_INF_VERSIONS;
+
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
@@ -20,6 +23,7 @@ import org.jboss.jandex.Indexer;
 import org.jboss.logging.Logger;
 
 import io.quarkus.deployment.util.IoUtil;
+import io.smallrye.common.io.jar.JarFiles;
 
 public class IndexingUtil {
 
@@ -59,37 +63,55 @@ public class IndexingUtil {
     private static Index indexJar(JarFile file) throws IOException {
         Indexer indexer = new Indexer();
         Enumeration<JarEntry> e = file.entries();
+        boolean multiRelease = JarFiles.isMultiRelease(file);
         while (e.hasMoreElements()) {
             JarEntry entry = e.nextElement();
             if (entry.getName().endsWith(".class")) {
-                try (InputStream inputStream = file.getInputStream(entry)) {
-                    indexer.index(inputStream);
+                if (multiRelease && entry.getName().startsWith(META_INF_VERSIONS)) {
+                    String part = entry.getName().substring(META_INF_VERSIONS.length());
+                    int slash = part.indexOf("/");
+                    if (slash != -1) {
+                        try {
+                            int ver = Integer.parseInt(part.substring(0, slash));
+                            if (ver <= JAVA_VERSION) {
+                                try (InputStream inputStream = file.getInputStream(entry)) {
+                                    indexer.index(inputStream);
+                                }
+                            }
+                        } catch (NumberFormatException ex) {
+                            log.debug("Failed to parse META-INF/versions entry", ex);
+                        }
+                    }
+                } else {
+                    try (InputStream inputStream = file.getInputStream(entry)) {
+                        indexer.index(inputStream);
+                    }
                 }
             }
         }
         return indexer.complete();
     }
 
-    public static void indexClass(String beanClass, Indexer indexer, IndexView quarkusIndex,
+    public static void indexClass(String className, Indexer indexer, IndexView quarkusIndex,
             Set<DotName> additionalIndex, ClassLoader classLoader) {
-        DotName beanClassName = DotName.createSimple(beanClass);
-        if (additionalIndex.contains(beanClassName)) {
+        DotName classDotName = DotName.createSimple(className);
+        if (additionalIndex.contains(classDotName)) {
             return;
         }
-        ClassInfo beanInfo = quarkusIndex.getClassByName(beanClassName);
-        if (beanInfo == null) {
-            log.debugf("Index bean class: %s", beanClass);
-            try (InputStream stream = IoUtil.readClass(classLoader, beanClass)) {
-                beanInfo = indexer.index(stream);
-                additionalIndex.add(beanInfo.name());
+        ClassInfo classInfo = quarkusIndex.getClassByName(classDotName);
+        if (classInfo == null) {
+            log.debugf("Index class: %s", className);
+            try (InputStream stream = IoUtil.readClass(classLoader, className)) {
+                classInfo = indexer.index(stream);
+                additionalIndex.add(classInfo.name());
             } catch (Exception e) {
-                throw new IllegalStateException("Failed to index: " + beanClass, e);
+                throw new IllegalStateException("Failed to index: " + className, e);
             }
         } else {
             // The class could be indexed by quarkus - we still need to distinguish framework classes
-            additionalIndex.add(beanClassName);
+            additionalIndex.add(classDotName);
         }
-        for (DotName annotationName : beanInfo.annotations().keySet()) {
+        for (DotName annotationName : classInfo.annotations().keySet()) {
             if (!additionalIndex.contains(annotationName) && quarkusIndex.getClassByName(annotationName) == null) {
                 try (InputStream annotationStream = IoUtil.readClass(classLoader, annotationName.toString())) {
                     if (annotationStream == null) {
@@ -100,43 +122,43 @@ public class IndexingUtil {
                         additionalIndex.add(annotationName);
                     }
                 } catch (IOException e) {
-                    throw new IllegalStateException("Failed to index: " + beanClass, e);
+                    throw new IllegalStateException("Failed to index: " + className, e);
                 }
             }
         }
-        if (beanInfo.superName() != null && !beanInfo.superName().equals(OBJECT)) {
-            indexClass(beanInfo.superName().toString(), indexer, quarkusIndex, additionalIndex, classLoader);
+        if (classInfo.superName() != null && !classInfo.superName().equals(OBJECT)) {
+            indexClass(classInfo.superName().toString(), indexer, quarkusIndex, additionalIndex, classLoader);
         }
     }
 
-    public static void indexClass(String beanClass, Indexer indexer,
+    public static void indexClass(String className, Indexer indexer,
             IndexView quarkusIndex, Set<DotName> additionalIndex,
             ClassLoader classLoader, byte[] beanData) {
-        DotName beanClassName = DotName.createSimple(beanClass);
-        if (additionalIndex.contains(beanClassName)) {
+        DotName classDotName = DotName.createSimple(className);
+        if (additionalIndex.contains(classDotName)) {
             return;
         }
-        ClassInfo beanInfo = quarkusIndex.getClassByName(beanClassName);
-        if (beanInfo == null) {
-            log.debugf("Index bean class: %s", beanClass);
+        ClassInfo classInfo = quarkusIndex.getClassByName(classDotName);
+        if (classInfo == null) {
+            log.debugf("Index class: %s", className);
             try (InputStream stream = new ByteArrayInputStream(beanData)) {
-                beanInfo = indexer.index(stream);
-                additionalIndex.add(beanInfo.name());
+                classInfo = indexer.index(stream);
+                additionalIndex.add(classInfo.name());
             } catch (IOException e) {
-                throw new IllegalStateException("Failed to index: " + beanClass, e);
+                throw new IllegalStateException("Failed to index: " + className, e);
             }
         } else {
             // The class could be indexed by quarkus - we still need to distinguish framework classes
-            additionalIndex.add(beanClassName);
+            additionalIndex.add(classDotName);
         }
-        for (DotName annotationName : beanInfo.annotations().keySet()) {
+        for (DotName annotationName : classInfo.annotations().keySet()) {
             if (!additionalIndex.contains(annotationName) && quarkusIndex.getClassByName(annotationName) == null) {
                 try (InputStream annotationStream = IoUtil.readClass(classLoader, annotationName.toString())) {
                     log.debugf("Index annotation: %s", annotationName);
                     indexer.index(annotationStream);
                     additionalIndex.add(annotationName);
                 } catch (IOException e) {
-                    throw new IllegalStateException("Failed to index: " + beanClass, e);
+                    throw new IllegalStateException("Failed to index: " + className, e);
                 }
             }
         }

@@ -66,6 +66,18 @@ public class CodeFlowTest {
 
             assertEquals("Welcome to Test App", page.getTitleText(),
                     "A second request should not redirect and just re-authenticate the user");
+
+            page = webClient.getPage("http://localhost:8081/web-app/configMetadataIssuer");
+
+            assertEquals(
+                    KeycloakRealmResourceManager.KEYCLOAK_SERVER_URL + "/realms/" + KeycloakRealmResourceManager.KEYCLOAK_REALM,
+                    page.asText());
+
+            page = webClient.getPage("http://localhost:8081/web-app/configMetadataScopes");
+
+            assertTrue(page.asText().contains("openid"));
+            assertTrue(page.asText().contains("profile"));
+
             webClient.getCookieManager().clearCookies();
         }
     }
@@ -892,10 +904,28 @@ public class CodeFlowTest {
 
     @Test
     public void testNoCodeFlowUnprotected() {
-        RestAssured.when().get("/public-web-app/access")
+        RestAssured.when().get("/public-web-app/name")
                 .then()
                 .statusCode(200)
                 .body(Matchers.equalTo("no user"));
+    }
+
+    @Test
+    public void testCustomLogin() throws Exception {
+        try (final WebClient webClient = createWebClient()) {
+            HtmlPage page = webClient.getPage("http://localhost:8081/public-web-app/login");
+
+            assertEquals("Sign in to quarkus", page.getTitleText());
+
+            HtmlForm loginForm = page.getForms().get(0);
+
+            loginForm.getInputByName("username").setValueAttribute("alice");
+            loginForm.getInputByName("password").setValueAttribute("alice");
+
+            page = loginForm.getInputByName("login").click();
+
+            assertEquals("alice", page.getBody().asText());
+        }
     }
 
     private WebClient createWebClient() {

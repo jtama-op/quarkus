@@ -1,10 +1,10 @@
 package io.quarkus.devtools.project.buildfile;
 
-import io.quarkus.bootstrap.model.AppArtifactCoords;
 import io.quarkus.devtools.project.QuarkusProject;
 import io.quarkus.devtools.project.buildfile.AbstractGradleBuildFile.Model;
-import io.quarkus.platform.descriptor.QuarkusPlatformDescriptor;
+import io.quarkus.maven.ArtifactCoords;
 import io.quarkus.platform.tools.ToolsUtils;
+import io.quarkus.registry.catalog.ExtensionCatalog;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -35,10 +35,10 @@ abstract class AbstractGradleBuildFilesCreator {
 
     abstract void createSettingsContent(String artifactId) throws IOException;
 
-    abstract void addDependencyInBuildFile(AppArtifactCoords coords) throws IOException;
+    abstract void addDependencyInBuildFile(ArtifactCoords coords) throws IOException;
 
     public void create(String groupId, String artifactId, String version,
-            Properties properties, List<AppArtifactCoords> extensions) throws IOException {
+            Properties properties, List<ArtifactCoords> extensions) throws IOException {
         createSettingsContent(artifactId);
         createBuildContent(groupId, version);
         createProperties();
@@ -122,20 +122,21 @@ abstract class AbstractGradleBuildFilesCreator {
     }
 
     private void createProperties() throws IOException {
-        final QuarkusPlatformDescriptor platform = quarkusProject.getPlatformDescriptor();
+        final ExtensionCatalog platform = quarkusProject.getExtensionsCatalog();
         Properties props = getModel().getPropertiesContent();
         if (props.getProperty("quarkusPluginVersion") == null) {
             props.setProperty("quarkusPluginVersion",
                     ToolsUtils.getGradlePluginVersion(ToolsUtils.readQuarkusProperties(platform)));
         }
+        final ArtifactCoords bom = platform.getBom();
         if (props.getProperty("quarkusPlatformGroupId") == null) {
-            props.setProperty("quarkusPlatformGroupId", platform.getBomGroupId());
+            props.setProperty("quarkusPlatformGroupId", bom.getGroupId());
         }
         if (props.getProperty("quarkusPlatformArtifactId") == null) {
-            props.setProperty("quarkusPlatformArtifactId", platform.getBomArtifactId());
+            props.setProperty("quarkusPlatformArtifactId", bom.getArtifactId());
         }
         if (props.getProperty("quarkusPlatformVersion") == null) {
-            props.setProperty("quarkusPlatformVersion", platform.getBomVersion());
+            props.setProperty("quarkusPlatformVersion", bom.getVersion());
         }
     }
 

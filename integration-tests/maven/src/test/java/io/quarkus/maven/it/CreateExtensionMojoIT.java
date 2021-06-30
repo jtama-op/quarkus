@@ -45,9 +45,40 @@ public class CreateExtensionMojoIT extends QuarkusPlatformAwareMojoTestBase {
         assertThatDirectoryTreeMatchSnapshots(testInfo, testDirPath)
                 .contains(
                         "extensions/my-ext/pom.xml",
+                        "extensions/my-ext/runtime/src/main/resources/META-INF/quarkus-extension.yaml",
                         "extensions/my-ext/deployment/src/main/java/org/acme/my/ext/deployment/MyExtProcessor.java",
                         "integration-tests/my-ext/pom.xml",
                         "integration-tests/my-ext/src/test/java/org/acme/my/ext/it/MyExtResourceTest.java");
+        assertThatMatchSnapshot(testInfo, testDirPath, "extensions/my-ext/pom.xml");
+        assertThatMatchSnapshot(testInfo, testDirPath,
+                "extensions/my-ext/runtime/src/main/resources/META-INF/quarkus-extension.yaml");
+        assertThatMatchSnapshot(testInfo, testDirPath, "bom/application/pom.xml");
+        assertThatMatchSnapshot(testInfo, testDirPath, "integration-tests/pom.xml");
+        assertThatMatchSnapshot(testInfo, testDirPath, "extensions/pom.xml");
+    }
+
+    @Test
+    public void testCreateCoreExtensionFromExtensionsDir(TestInfo testInfo) throws Throwable {
+        testDir = initProject("projects/create-extension-quarkus-core", "output/create-extension-quarkus-core-extensions-dir");
+        assertThat(testDir).isDirectory();
+        invoker = initInvoker(testDir.toPath().resolve("extensions/").toFile());
+
+        Properties properties = new Properties();
+        properties.put("extensionId", "quarkus-my-ext");
+        InvocationResult result = setup(properties);
+
+        assertThat(result.getExitCode()).isZero();
+
+        final Path testDirPath = testDir.toPath();
+        assertThatDirectoryTreeMatchSnapshots(testInfo, testDirPath)
+                .contains(
+                        "extensions/my-ext/pom.xml",
+                        "extensions/my-ext/deployment/src/main/java/org/acme/my/ext/deployment/MyExtProcessor.java",
+                        "integration-tests/my-ext/pom.xml",
+                        "integration-tests/my-ext/src/test/java/org/acme/my/ext/it/MyExtResourceTest.java");
+        assertThatMatchSnapshot(testInfo, testDirPath, "extensions/my-ext/pom.xml");
+        assertThatMatchSnapshot(testInfo, testDirPath,
+                "extensions/my-ext/runtime/src/main/resources/META-INF/quarkus-extension.yaml");
         assertThatMatchSnapshot(testInfo, testDirPath, "bom/application/pom.xml");
         assertThatMatchSnapshot(testInfo, testDirPath, "integration-tests/pom.xml");
         assertThatMatchSnapshot(testInfo, testDirPath, "extensions/pom.xml");
@@ -72,8 +103,8 @@ public class CreateExtensionMojoIT extends QuarkusPlatformAwareMojoTestBase {
                 .contains(
                         "quarkus-my-quarki-ext/pom.xml",
                         "quarkus-my-quarki-ext/deployment/src/main/java/io/quarkiverse/my/quarki/ext/deployment/MyQuarkiExtProcessor.java",
-                        "quarkus-my-quarki-ext/integration-test/pom.xml",
-                        "quarkus-my-quarki-ext/integration-test/src/test/java/io/quarkiverse/my/quarki/ext/it/MyQuarkiExtResourceTest.java");
+                        "quarkus-my-quarki-ext/integration-tests/pom.xml",
+                        "quarkus-my-quarki-ext/integration-tests/src/test/java/io/quarkiverse/my/quarki/ext/it/MyQuarkiExtResourceTest.java");
         assertThatMatchSnapshot(testInfo, testDirPath, "quarkus-my-quarki-ext/pom.xml");
         assertThatMatchSnapshot(testInfo, testDirPath, "quarkus-my-quarki-ext/runtime/pom.xml");
     }
@@ -98,8 +129,8 @@ public class CreateExtensionMojoIT extends QuarkusPlatformAwareMojoTestBase {
                 .contains(
                         "my-org-my-own-ext/pom.xml",
                         "my-org-my-own-ext/deployment/src/main/java/io/standalone/my/own/ext/deployment/MyOwnExtProcessor.java",
-                        "my-org-my-own-ext/integration-test/pom.xml",
-                        "my-org-my-own-ext/integration-test/src/test/java/io/standalone/my/own/ext/it/MyOwnExtResourceTest.java");
+                        "my-org-my-own-ext/integration-tests/pom.xml",
+                        "my-org-my-own-ext/integration-tests/src/test/java/io/standalone/my/own/ext/it/MyOwnExtResourceTest.java");
         assertThatMatchSnapshot(testInfo, testDirPath, "my-org-my-own-ext/pom.xml");
         assertThatMatchSnapshot(testInfo, testDirPath, "my-org-my-own-ext/runtime/pom.xml");
     }
@@ -115,7 +146,6 @@ public class CreateExtensionMojoIT extends QuarkusPlatformAwareMojoTestBase {
         request.setDebug(false);
         request.setShowErrors(true);
         request.setProperties(params);
-        getEnv().forEach(request::addShellEnvironment);
         File log = new File(testDir.getParent(), "build-create-extension-" + testDir.getName() + ".log");
         PrintStreamLogger logger = new PrintStreamLogger(new PrintStream(new FileOutputStream(log), false, "UTF-8"),
                 InvokerLogger.DEBUG);

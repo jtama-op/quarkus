@@ -18,6 +18,8 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 
+import javax.enterprise.context.ApplicationScoped;
+
 import org.jboss.jandex.AnnotationInstance;
 import org.jboss.jandex.AnnotationTarget;
 import org.jboss.jandex.ClassInfo;
@@ -29,20 +31,16 @@ import org.jboss.logging.Logger;
 import io.quarkus.arc.deployment.AdditionalBeanBuildItem;
 import io.quarkus.arc.deployment.AnnotationsTransformerBuildItem;
 import io.quarkus.arc.deployment.BeanArchiveIndexBuildItem;
-import io.quarkus.arc.deployment.BeanRegistrarBuildItem;
 import io.quarkus.arc.deployment.InterceptorBindingRegistrarBuildItem;
-import io.quarkus.arc.processor.BeanConfigurator;
-import io.quarkus.arc.processor.BeanRegistrar;
-import io.quarkus.arc.processor.BuiltinScope;
-import io.quarkus.deployment.Capability;
+import io.quarkus.arc.deployment.SyntheticBeanBuildItem;
 import io.quarkus.deployment.Feature;
 import io.quarkus.deployment.annotations.BuildProducer;
 import io.quarkus.deployment.annotations.BuildStep;
 import io.quarkus.deployment.annotations.ExecutionTime;
 import io.quarkus.deployment.annotations.Record;
 import io.quarkus.deployment.builditem.ApplicationClassPredicateBuildItem;
-import io.quarkus.deployment.builditem.CapabilityBuildItem;
 import io.quarkus.deployment.builditem.FeatureBuildItem;
+import io.quarkus.deployment.builditem.nativeimage.NativeImageSecurityProviderBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.ReflectiveClassBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.RuntimeReinitializedClassBuildItem;
 import io.quarkus.gizmo.MethodDescriptor;
@@ -65,7 +63,7 @@ import io.quarkus.security.runtime.interceptor.SecurityCheckStorageBuilder;
 import io.quarkus.security.runtime.interceptor.SecurityConstrainer;
 import io.quarkus.security.runtime.interceptor.SecurityHandler;
 import io.quarkus.security.runtime.interceptor.check.SecurityCheck;
-import io.quarkus.security.spi.AdditionalSecuredClassesBuildIem;
+import io.quarkus.security.spi.AdditionalSecuredClassesBuildItem;
 import io.quarkus.security.spi.runtime.AuthorizationController;
 
 public class SecurityProcessor {
@@ -126,6 +124,11 @@ public class SecurityProcessor {
         if (bouncyCastleJsseProvider.isPresent()) {
             reflection.produce(
                     new ReflectiveClassBuildItem(true, true, SecurityProviderUtils.BOUNCYCASTLE_JSSE_PROVIDER_CLASS_NAME));
+            reflection.produce(new ReflectiveClassBuildItem(true, true, true,
+                    "org.bouncycastle.jsse.provider.DefaultSSLContextSpi$LazyManagers"));
+            runtimeReInitialized
+                    .produce(new RuntimeReinitializedClassBuildItem(
+                            "org.bouncycastle.jsse.provider.DefaultSSLContextSpi$LazyManagers"));
             prepareBouncyCastleProvider(reflection, runtimeReInitialized, bouncyCastleJsseProvider.get().isInFipsMode());
         } else if (bouncyCastleProvider.isPresent()) {
             prepareBouncyCastleProvider(reflection, runtimeReInitialized, bouncyCastleProvider.get().isInFipsMode());
@@ -134,9 +137,9 @@ public class SecurityProcessor {
 
     private static void prepareBouncyCastleProvider(BuildProducer<ReflectiveClassBuildItem> reflection,
             BuildProducer<RuntimeReinitializedClassBuildItem> runtimeReInitialized,
-            boolean inFipsMode) {
+            boolean isFipsMode) {
         reflection.produce(new ReflectiveClassBuildItem(true, true,
-                inFipsMode ? SecurityProviderUtils.BOUNCYCASTLE_FIPS_PROVIDER_CLASS_NAME
+                isFipsMode ? SecurityProviderUtils.BOUNCYCASTLE_FIPS_PROVIDER_CLASS_NAME
                         : SecurityProviderUtils.BOUNCYCASTLE_PROVIDER_CLASS_NAME));
         reflection.produce(new ReflectiveClassBuildItem(true, true,
                 "org.bouncycastle.jcajce.provider.asymmetric.rsa.PSSSignatureSpi"));
@@ -144,11 +147,43 @@ public class SecurityProcessor {
                 "org.bouncycastle.jcajce.provider.asymmetric.rsa.PSSSignatureSpi$SHA256withRSA"));
         runtimeReInitialized
                 .produce(new RuntimeReinitializedClassBuildItem("org.bouncycastle.crypto.CryptoServicesRegistrar"));
-        if (!inFipsMode) {
+        if (!isFipsMode) {
+            reflection.produce(new ReflectiveClassBuildItem(true, true, true,
+                    "org.bouncycastle.jcajce.provider.drbg.DRBG$Default"));
             runtimeReInitialized
                     .produce(new RuntimeReinitializedClassBuildItem("org.bouncycastle.jcajce.provider.drbg.DRBG$Default"));
             runtimeReInitialized
                     .produce(new RuntimeReinitializedClassBuildItem("org.bouncycastle.jcajce.provider.drbg.DRBG$NonceAndIV"));
+        } else {
+            reflection.produce(new ReflectiveClassBuildItem(true, true, true, "org.bouncycastle.crypto.general.AES"));
+            runtimeReInitialized.produce(new RuntimeReinitializedClassBuildItem("org.bouncycastle.crypto.general.AES"));
+            runtimeReInitialized
+                    .produce(new RuntimeReinitializedClassBuildItem("org.bouncycastle.math.ec.custom.sec.SecP521R1Curve"));
+            runtimeReInitialized
+                    .produce(new RuntimeReinitializedClassBuildItem("org.bouncycastle.math.ec.custom.sec.SecP384R1Curve"));
+            runtimeReInitialized
+                    .produce(new RuntimeReinitializedClassBuildItem("org.bouncycastle.math.ec.custom.sec.SecP256R1Curve"));
+            runtimeReInitialized.produce(new RuntimeReinitializedClassBuildItem("org.bouncycastle.math.ec.ECPoint"));
+            runtimeReInitialized
+                    .produce(new RuntimeReinitializedClassBuildItem(
+                            "org.bouncycastle.crypto.asymmetric.NamedECDomainParameters"));
+            runtimeReInitialized
+                    .produce(new RuntimeReinitializedClassBuildItem("org.bouncycastle.crypto.asymmetric.CustomNamedCurves"));
+            runtimeReInitialized
+                    .produce(new RuntimeReinitializedClassBuildItem("org.bouncycastle.asn1.ua.DSTU4145NamedCurves"));
+            runtimeReInitialized
+                    .produce(new RuntimeReinitializedClassBuildItem("org.bouncycastle.asn1.sec.SECNamedCurves"));
+            runtimeReInitialized
+                    .produce(new RuntimeReinitializedClassBuildItem("org.bouncycastle.asn1.cryptopro.ECGOST3410NamedCurves"));
+            runtimeReInitialized
+                    .produce(new RuntimeReinitializedClassBuildItem("org.bouncycastle.asn1.x9.X962NamedCurves"));
+            runtimeReInitialized
+                    .produce(new RuntimeReinitializedClassBuildItem("org.bouncycastle.asn1.x9.ECNamedCurveTable"));
+            runtimeReInitialized
+                    .produce(new RuntimeReinitializedClassBuildItem("org.bouncycastle.asn1.anssi.ANSSINamedCurves"));
+            runtimeReInitialized
+                    .produce(new RuntimeReinitializedClassBuildItem("org.bouncycastle.asn1.teletrust.TeleTrusTNamedCurves"));
+            runtimeReInitialized.produce(new RuntimeReinitializedClassBuildItem("org.bouncycastle.jcajce.spec.ECUtil"));
         }
 
     }
@@ -166,6 +201,25 @@ public class SecurityProcessor {
             }
         } else if (bouncyCastleProvider.isPresent()) {
             recorder.addBouncyCastleProvider(bouncyCastleProvider.get().isInFipsMode());
+        }
+    }
+
+    @BuildStep
+    void addBouncyCastleProvidersToNativeImage(BuildProducer<NativeImageSecurityProviderBuildItem> additionalProviders,
+            Optional<BouncyCastleProviderBuildItem> bouncyCastleProvider,
+            Optional<BouncyCastleJsseProviderBuildItem> bouncyCastleJsseProvider) {
+        if (bouncyCastleJsseProvider.isPresent()) {
+            additionalProviders.produce(
+                    new NativeImageSecurityProviderBuildItem(SecurityProviderUtils.BOUNCYCASTLE_JSSE_PROVIDER_CLASS_NAME));
+            final String providerName = bouncyCastleJsseProvider.get().isInFipsMode()
+                    ? SecurityProviderUtils.BOUNCYCASTLE_FIPS_PROVIDER_CLASS_NAME
+                    : SecurityProviderUtils.BOUNCYCASTLE_PROVIDER_CLASS_NAME;
+            additionalProviders.produce(new NativeImageSecurityProviderBuildItem(providerName));
+        } else if (bouncyCastleProvider.isPresent()) {
+            final String providerName = bouncyCastleProvider.get().isInFipsMode()
+                    ? SecurityProviderUtils.BOUNCYCASTLE_FIPS_PROVIDER_CLASS_NAME
+                    : SecurityProviderUtils.BOUNCYCASTLE_PROVIDER_CLASS_NAME;
+            additionalProviders.produce(new NativeImageSecurityProviderBuildItem(providerName));
         }
     }
 
@@ -209,14 +263,14 @@ public class SecurityProcessor {
      */
     @BuildStep
     void transformSecurityAnnotations(BuildProducer<AnnotationsTransformerBuildItem> transformers,
-            List<AdditionalSecuredClassesBuildIem> additionalSecuredClasses,
+            List<AdditionalSecuredClassesBuildItem> additionalSecuredClasses,
             SecurityBuildTimeConfig config) {
         if (config.denyUnannotated) {
             transformers.produce(new AnnotationsTransformerBuildItem(new DenyingUnannotatedTransformer()));
         }
         if (!additionalSecuredClasses.isEmpty()) {
             Set<String> additionalSecured = new HashSet<>();
-            for (AdditionalSecuredClassesBuildIem securedClasses : additionalSecuredClasses) {
+            for (AdditionalSecuredClassesBuildItem securedClasses : additionalSecuredClasses) {
                 for (ClassInfo additionalSecuredClass : securedClasses.additionalSecuredClasses) {
                     additionalSecured.add(additionalSecuredClass.name().toString());
                 }
@@ -228,16 +282,16 @@ public class SecurityProcessor {
 
     @BuildStep
     @Record(ExecutionTime.STATIC_INIT)
-    void gatherSecurityChecks(BuildProducer<BeanRegistrarBuildItem> beanRegistrars,
+    void gatherSecurityChecks(BuildProducer<SyntheticBeanBuildItem> syntheticBeans,
             BeanArchiveIndexBuildItem beanArchiveBuildItem,
             BuildProducer<ApplicationClassPredicateBuildItem> classPredicate,
-            List<AdditionalSecuredClassesBuildIem> additionalSecuredClasses,
+            List<AdditionalSecuredClassesBuildItem> additionalSecuredClasses,
             SecurityCheckRecorder recorder,
             List<AdditionalSecurityCheckBuildItem> additionalSecurityChecks, SecurityBuildTimeConfig config) {
         classPredicate.produce(new ApplicationClassPredicateBuildItem(new SecurityCheckStorage.AppPredicate()));
 
         final Map<DotName, ClassInfo> additionalSecured = new HashMap<>();
-        for (AdditionalSecuredClassesBuildIem securedClasses : additionalSecuredClasses) {
+        for (AdditionalSecuredClassesBuildItem securedClasses : additionalSecuredClasses) {
             securedClasses.additionalSecuredClasses.forEach(c -> {
                 if (!additionalSecured.containsKey(c.name())) {
                     additionalSecured.put(c.name(), c);
@@ -266,25 +320,14 @@ public class SecurityProcessor {
         }
         recorder.create(builder);
 
-        beanRegistrars.produce(new BeanRegistrarBuildItem(new BeanRegistrar() {
-
-            @Override
-            public void register(RegistrationContext registrationContext) {
-
-                DotName name = DotName.createSimple(SecurityCheckStorage.class.getName());
-
-                BeanConfigurator<Object> configurator = registrationContext.configure(name);
-                configurator.addType(name);
-                configurator.scope(BuiltinScope.APPLICATION.getInfo());
-                configurator.creator(creator -> {
-                    ResultHandle ret = creator.invokeStaticMethod(
-                            MethodDescriptor.ofMethod(SecurityCheckRecorder.class, "getStorage",
-                                    SecurityCheckStorage.class));
-                    creator.returnValue(ret);
-                });
-                configurator.done();
-            }
-        }));
+        syntheticBeans.produce(
+                SyntheticBeanBuildItem.configure(SecurityCheckStorage.class)
+                        .scope(ApplicationScoped.class)
+                        .creator(creator -> {
+                            ResultHandle ret = creator.invokeStaticMethod(MethodDescriptor.ofMethod(SecurityCheckRecorder.class,
+                                    "getStorage", SecurityCheckStorage.class));
+                            creator.returnValue(ret);
+                        }).done());
     }
 
     private Map<MethodInfo, SecurityCheck> gatherSecurityAnnotations(
@@ -399,11 +442,6 @@ public class SecurityProcessor {
         }
 
         return result;
-    }
-
-    @BuildStep
-    CapabilityBuildItem capability() {
-        return new CapabilityBuildItem(Capability.SECURITY);
     }
 
     @BuildStep

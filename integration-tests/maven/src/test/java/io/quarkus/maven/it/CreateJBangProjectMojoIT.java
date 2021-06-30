@@ -52,7 +52,6 @@ public class CreateJBangProjectMojoIT extends QuarkusPlatformAwareMojoTestBase {
         request.setDebug(false);
         request.setShowErrors(true);
         request.setProperties(params);
-        getEnv().forEach(request::addShellEnvironment);
         File log = new File(testDir, "build-create-" + testDir.getName() + ".log");
         PrintStreamLogger logger = new PrintStreamLogger(new PrintStream(new FileOutputStream(log), false, "UTF-8"),
                 InvokerLogger.DEBUG);

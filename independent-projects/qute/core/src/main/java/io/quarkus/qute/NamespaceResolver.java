@@ -12,7 +12,7 @@ import java.util.function.Function;
  * 
  * @see EngineBuilder#addNamespaceResolver(NamespaceResolver)
  */
-public interface NamespaceResolver extends Resolver {
+public interface NamespaceResolver extends Resolver, WithPriority {
 
     /**
      * 
@@ -24,19 +24,24 @@ public interface NamespaceResolver extends Resolver {
     }
 
     /**
+     * A valid namespace consists of alphanumeric characters and underscores.
      * 
      * @return the namespace
-     * @see ExpressionImpl#namespace
+     * @see Expression#getNamespace()
      */
     String getNamespace();
 
+    /**
+     * A convenient builder.
+     */
     final class Builder {
 
         private final String namespace;
         private Function<EvalContext, CompletionStage<Object>> resolve;
+        private int priority = WithPriority.DEFAULT_PRIORITY;
 
         Builder(String namespace) {
-            this.namespace = namespace;
+            this.namespace = Namespaces.requireValid(namespace);
         }
 
         public Builder resolve(Function<EvalContext, Object> func) {
@@ -49,20 +54,43 @@ public interface NamespaceResolver extends Resolver {
             return this;
         }
 
+        public Builder priority(int priority) {
+            this.priority = priority;
+            return this;
+        }
+
         public NamespaceResolver build() {
             Objects.requireNonNull(resolve);
-            return new NamespaceResolver() {
+            return new NamespaceResolverImpl(namespace, priority, resolve);
+        }
 
-                @Override
-                public CompletionStage<Object> resolve(EvalContext context) {
-                    return resolve.apply(context);
-                }
+    }
 
-                @Override
-                public String getNamespace() {
-                    return namespace;
-                }
-            };
+    final class NamespaceResolverImpl implements NamespaceResolver {
+
+        private final String namespace;
+        private final int priority;
+        private final Function<EvalContext, CompletionStage<Object>> resolve;
+
+        public NamespaceResolverImpl(String namespace, int priority, Function<EvalContext, CompletionStage<Object>> resolve) {
+            this.namespace = namespace;
+            this.priority = priority;
+            this.resolve = resolve;
+        }
+
+        @Override
+        public int getPriority() {
+            return priority;
+        }
+
+        @Override
+        public CompletionStage<Object> resolve(EvalContext context) {
+            return resolve.apply(context);
+        }
+
+        @Override
+        public String getNamespace() {
+            return namespace;
         }
 
     }

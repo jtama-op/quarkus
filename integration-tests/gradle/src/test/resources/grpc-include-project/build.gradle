@@ -12,17 +12,14 @@ repositories {
     } else {
         mavenLocal()
     }
-    jcenter()
     mavenCentral()
     gradlePluginPortal()
 }
 
 dependencies {
-    implementation 'io.quarkus:quarkus-grpc'
     implementation enforcedPlatform("${quarkusPlatformGroupId}:${quarkusPlatformArtifactId}:${quarkusPlatformVersion}")
     implementation 'io.quarkus:quarkus-resteasy'
-
-    testImplementation 'io.quarkus:quarkus-junit5'
+    implementation 'io.quarkus:quarkus-grpc'
 }
 
 group 'org.acme'

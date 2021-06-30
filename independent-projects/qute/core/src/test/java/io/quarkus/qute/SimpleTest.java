@@ -3,7 +3,7 @@ package io.quarkus.qute;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.fail;
 
-import io.quarkus.qute.Results.Result;
+import io.quarkus.qute.Results.NotFound;
 import io.quarkus.qute.TemplateNode.Origin;
 import java.util.Collection;
 import java.util.Collections;
@@ -82,6 +82,7 @@ public class SimpleTest {
         assertEquals("John Bug", engine.parse("{name ?: 'John'} {surname or 'John'}").render(data));
         assertEquals("John Bug", engine.parse("{name ?: \"John Bug\"}").render(data));
         assertEquals("Is null", engine.parse("{foo ?: 'Is null'}").render(data));
+        assertEquals("10", engine.parse("{foo.age.limit ?: 10}").render(data));
     }
 
     @Test
@@ -144,7 +145,7 @@ public class SimpleTest {
 
     @Test
     public void testNotFound() {
-        assertEquals("foo.bar Collection size: 0",
+        assertEquals("Property \"foo\" not found in foo.bar Collection size: 0",
                 Engine.builder().addDefaultValueResolvers()
                         .addResultMapper(new ResultMapper() {
 
@@ -153,17 +154,20 @@ public class SimpleTest {
                             }
 
                             public boolean appliesTo(Origin origin, Object val) {
-                                return val.equals(Result.NOT_FOUND);
+                                return Results.isNotFound(val);
                             }
 
                             @Override
                             public String map(Object result, Expression expression) {
+                                if (result instanceof NotFound) {
+                                    return ((NotFound) result).asMessage() + " in " + expression.toOriginalString();
+                                }
                                 return expression.toOriginalString();
                             }
                         }).addResultMapper(new ResultMapper() {
 
                             public boolean appliesTo(Origin origin, Object val) {
-                                return val.equals(Result.NOT_FOUND);
+                                return Results.isNotFound(val);
                             }
 
                             @Override
@@ -182,8 +186,9 @@ public class SimpleTest {
                                 return "Collection size: " + collection.size();
                             }
                         }).build()
-                        .parse("{foo.bar} {this}")
-                        .render(Collections.emptyList()));
+                        .parse("{foo.bar} {collection}")
+                        .data("collection", Collections.emptyList())
+                        .render());
     }
 
     @Test
@@ -193,7 +198,7 @@ public class SimpleTest {
                     .addResultMapper(new ResultMapper() {
 
                         public boolean appliesTo(Origin origin, Object val) {
-                            return val.equals(Result.NOT_FOUND);
+                            return Results.isNotFound(val);
                         }
 
                         @Override
@@ -221,9 +226,9 @@ public class SimpleTest {
 
     @Test
     public void testOrEmpty() {
-        Engine engine = Engine.builder().addDefaultSectionHelpers()
-                .addValueResolvers(ValueResolvers.mapResolver(), ValueResolvers.orEmpty())
-                .build();
-        assertEquals("STARTEND", engine.parse("START{#for pet in pets.orEmpty}...{/for}END").data("pets", null).render());
+        Engine engine = Engine.builder().addDefaults().build();
+        assertEquals("STARTEND::STARTJackEND",
+                engine.parse("START{#for pet in pets.orEmpty}...{/for}END::START{#for dog in dogs.orEmpty}{dog}{/for}END")
+                        .data("pets", null, "dogs", Collections.singleton("Jack")).render());
     }
 }

@@ -44,7 +44,7 @@ public class SimpleQuarkusRestTestCase {
                                     ParameterWithFromString.class, BeanParamSubClass.class, FieldInjectedSubClassResource.class,
                                     BeanParamSuperClass.class, IllegalClassExceptionMapper.class,
                                     MyParameterProvider.class, MyParameterConverter.class, MyParameter.class,
-                                    NewParamsRestResource.class);
+                                    NewParamsRestResource.class, InterfaceResource.class, InterfaceResourceImpl.class);
                 }
             });
 
@@ -385,11 +385,16 @@ public class SimpleQuarkusRestTestCase {
                 .queryParam("q", "qv")
                 .queryParam("q3", "999")
                 .header("h", "123")
+                .header("X-My-Header", "test")
+                .header("Test-Header-Param", "test")
+                .header("Param-Empty", "empty")
                 .formParam("f", "fv")
                 .post("/new-params/myklass;m=mv/myregex/params/pv")
                 .then()
                 .log().ifError()
-                .body(Matchers.equalTo("params: p: pv, q: qv, h: 123, f: fv, m: mv, c: cv, q2: empty, q3: 999"));
+                .body(Matchers
+                        .equalTo(
+                                "params: p: pv, q: qv, h: 123, xMyHeader: test, testHeaderParam: test, paramEmpty: empty, f: fv, m: mv, c: cv, q2: empty, q3: 999"));
         RestAssured.get("/new-params/myklass/myregex/sse")
                 .then()
                 .log().ifError()
@@ -412,5 +417,11 @@ public class SimpleQuarkusRestTestCase {
     public void bigDecimal() {
         RestAssured.get("/simple/bigDecimal/1.0")
                 .then().statusCode(200).body(Matchers.equalTo("1.0"));
+    }
+
+    @Test
+    public void testInterfaceResource() {
+        RestAssured.get("/iface")
+                .then().statusCode(200).body(Matchers.equalTo("Hello"));
     }
 }

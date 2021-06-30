@@ -49,6 +49,34 @@ public class CustomTenantConfigResolver implements TenantConfigResolver {
             config.setJwksPath("jwks");
             config.setClientId("client");
             return config;
+        } else if ("tenant-oidc-no-introspection".equals(tenantId)) {
+            OidcTenantConfig config = new OidcTenantConfig();
+            config.setTenantId("tenant-oidc-no-introspection");
+            String uri = context.request().absoluteURI();
+            String authServerUri = uri.replace("/tenant/tenant-oidc-no-introspection/api/user", "/oidc");
+            config.setAuthServerUrl(authServerUri);
+            config.token.setAllowJwtIntrospection(false);
+            config.setClientId("client");
+            return config;
+        } else if ("tenant-oidc-introspection-only".equals(tenantId)) {
+            OidcTenantConfig config = new OidcTenantConfig();
+            config.setTenantId("tenant-oidc-introspection-only");
+            String uri = context.request().absoluteURI();
+            String authServerUri = uri.replace("/tenant/tenant-oidc-introspection-only/api/user", "/oidc");
+            config.setAuthServerUrl(authServerUri);
+            config.setDiscoveryEnabled(false);
+            config.setIntrospectionPath("introspect");
+            config.setClientId("client");
+            return config;
+        } else if ("tenant-oidc-no-opaque-token".equals(tenantId)) {
+            OidcTenantConfig config = new OidcTenantConfig();
+            config.setTenantId("tenant-oidc-no-opaque-token");
+            String uri = context.request().absoluteURI();
+            String authServerUri = uri.replace("/tenant-opaque/tenant-oidc-no-opaque-token/api/user", "/oidc");
+            config.setAuthServerUrl(authServerUri);
+            config.token.setAllowOpaqueTokenIntrospection(false);
+            config.setClientId("client");
+            return config;
         } else if ("tenant-web-app-dynamic".equals(tenantId)) {
             OidcTenantConfig config = new OidcTenantConfig();
             config.setTenantId("tenant-web-app-dynamic");

@@ -16,15 +16,16 @@
     <dependencies>
         <dependency>
             <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-devtools-testing</artifactId>
+            <scope>compile</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
             <artifactId>quarkus-devmode-test-utils</artifactId>
         </dependency>
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-devtools-common</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>io.quarkus</groupId>
-            <artifactId>quarkus-platform-descriptor-resolver-json</artifactId>
         </dependency>
         <dependency>
             <groupId>org.apache.maven.shared</groupId>
@@ -37,10 +38,6 @@
         <dependency>
             <groupId>org.awaitility</groupId>
             <artifactId>awaitility</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.jprocesses</groupId>
-            <artifactId>jProcesses</artifactId>
         </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>

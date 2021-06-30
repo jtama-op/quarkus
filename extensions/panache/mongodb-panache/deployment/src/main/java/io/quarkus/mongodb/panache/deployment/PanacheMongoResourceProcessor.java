@@ -2,12 +2,11 @@ package io.quarkus.mongodb.panache.deployment;
 
 import java.util.List;
 
-import io.quarkus.deployment.Capability;
 import io.quarkus.deployment.Feature;
 import io.quarkus.deployment.annotations.BuildStep;
-import io.quarkus.deployment.builditem.CapabilityBuildItem;
 import io.quarkus.deployment.builditem.CombinedIndexBuildItem;
 import io.quarkus.deployment.builditem.FeatureBuildItem;
+import io.quarkus.panache.common.deployment.MetamodelInfo;
 import io.quarkus.panache.common.deployment.PanacheEntityEnhancer;
 import io.quarkus.panache.common.deployment.PanacheMethodCustomizer;
 import io.quarkus.panache.common.deployment.PanacheRepositoryEnhancer;
@@ -26,14 +25,14 @@ public class PanacheMongoResourceProcessor extends BasePanacheMongoResourceProce
 
     @Override
     public PanacheMongoEntityEnhancer createEntityEnhancer(CombinedIndexBuildItem index,
-            List<PanacheMethodCustomizer> methodCustomizers) {
-        return new PanacheMongoEntityEnhancer(index.getIndex(), methodCustomizers, getImperativeTypeBundle());
+            List<PanacheMethodCustomizer> methodCustomizers, MetamodelInfo modelInfo) {
+        return new PanacheMongoEntityEnhancer(index.getIndex(), methodCustomizers, getImperativeTypeBundle(), modelInfo);
     }
 
     @Override
     public PanacheEntityEnhancer createReactiveEntityEnhancer(CombinedIndexBuildItem index,
-            List<PanacheMethodCustomizer> methodCustomizers) {
-        return new PanacheMongoEntityEnhancer(index.getIndex(), methodCustomizers, getReactiveTypeBundle());
+            List<PanacheMethodCustomizer> methodCustomizers, MetamodelInfo modelInfo) {
+        return new PanacheMongoEntityEnhancer(index.getIndex(), methodCustomizers, getReactiveTypeBundle(), modelInfo);
     }
 
     @Override
@@ -46,11 +45,6 @@ public class PanacheMongoResourceProcessor extends BasePanacheMongoResourceProce
     public PanacheRepositoryEnhancer createRepositoryEnhancer(CombinedIndexBuildItem index,
             List<PanacheMethodCustomizer> methodCustomizers) {
         return new PanacheMongoRepositoryEnhancer(index.getIndex(), getImperativeTypeBundle());
-    }
-
-    @BuildStep
-    protected CapabilityBuildItem capability() {
-        return new CapabilityBuildItem(Capability.MONGODB_PANACHE);
     }
 
     @BuildStep

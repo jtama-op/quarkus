@@ -1,9 +1,13 @@
 package io.quarkus.maven;
 
 import java.io.File;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
+import org.apache.maven.execution.MavenSession;
 import org.apache.maven.plugin.AbstractMojo;
+import org.apache.maven.plugin.MojoExecution;
 import org.apache.maven.plugin.MojoExecutionException;
 import org.apache.maven.plugin.MojoFailureException;
 import org.apache.maven.plugin.logging.Log;
@@ -47,6 +51,9 @@ public abstract class QuarkusBootstrapMojo extends AbstractMojo {
     @Parameter(defaultValue = "${project}", readonly = true, required = true)
     private MavenProject project;
 
+    @Parameter(defaultValue = "${session}", readonly = true)
+    private MavenSession session;
+
     @Parameter(defaultValue = "${project.build.directory}")
     private File buildDir;
 
@@ -54,14 +61,7 @@ public abstract class QuarkusBootstrapMojo extends AbstractMojo {
     private String finalName;
 
     /**
-     * @deprecated use {@code quarkus.package.type} instead
-     */
-    @Parameter(property = "uberJar", defaultValue = "false")
-    @Deprecated
-    private boolean uberJar;
-
-    /**
-     * When using the uberJar option, this array specifies entries that should
+     * When building an uber-jar, this array specifies entries that should
      * be excluded from the final jar. The entries are relative to the root of
      * the file. An example of this configuration could be:
      * <code><pre>
@@ -78,6 +78,42 @@ public abstract class QuarkusBootstrapMojo extends AbstractMojo {
      */
     @Parameter(property = "ignoredEntries")
     private String[] ignoredEntries;
+
+    /**
+     * Coordinates of the Maven artifact containing the original Java application to build the native image for.
+     * If not provided, the current project is assumed to be the original Java application.
+     * <p>
+     * The coordinates are expected to be expressed in the following format:
+     * <p>
+     * groupId:artifactId:classifier:type:version
+     * <p>
+     * With the classifier, type and version being optional.
+     * <p>
+     * If the type is missing, the artifact is assumed to be of type JAR.
+     * <p>
+     * If the version is missing, the artifact is going to be looked up among the project dependencies using the provided
+     * coordinates.
+     *
+     * <p>
+     * However, if the expression consists of only three parts, it is assumed to be groupId:artifactId:version.
+     *
+     * <p>
+     * If the expression consists of only four parts, it is assumed to be groupId:artifactId:classifier:type.
+     */
+    @Parameter(required = false, property = "appArtifact")
+    private String appArtifact;
+
+    /**
+     * The properties of the plugin.
+     */
+    @Parameter(property = "properties", required = false)
+    private Map<String, String> properties = new HashMap<>();
+
+    /**
+     * The context of the execution of the plugin.
+     */
+    @Parameter(defaultValue = "${mojoExecution}", readonly = true, required = true)
+    private MojoExecution mojoExecution;
 
     private AppArtifactKey projectId;
 
@@ -112,6 +148,10 @@ public abstract class QuarkusBootstrapMojo extends AbstractMojo {
      */
     protected abstract void doExecute() throws MojoExecutionException, MojoFailureException;
 
+    protected String appArtifactCoords() {
+        return appArtifact;
+    }
+
     protected RepositorySystem repositorySystem() {
         return bootstrapProvider.repositorySystem();
     }
@@ -132,6 +172,10 @@ public abstract class QuarkusBootstrapMojo extends AbstractMojo {
         return project;
     }
 
+    public MavenSession mavenSession() {
+        return session;
+    }
+
     protected File buildDir() {
         return buildDir;
     }
@@ -148,18 +192,20 @@ public abstract class QuarkusBootstrapMojo extends AbstractMojo {
         return ignoredEntries;
     }
 
-    protected boolean uberJar() {
-        if (uberJar) {
-            getLog().warn(
-                    "The parameter uberJar is deprecated, and will be removed in a future version. To build an uber-jar set the config property quarkus.package.type=uber-jar. For more info see https://quarkus.io/guides/maven-tooling#uber-jar-maven");
-        }
-        return uberJar;
+    protected Map<String, String> properties() {
+        return properties;
+    }
+
+    protected String executionId() {
+        return mojoExecution.getExecutionId();
     }
 
     protected AppArtifactKey projectId() {
         return projectId == null ? projectId = new AppArtifactKey(project.getGroupId(), project.getArtifactId()) : projectId;
     }
 
+    // @deprecated in 1.14.0.Final
+    @Deprecated
     protected AppArtifact projectArtifact() throws MojoExecutionException {
         return bootstrapProvider.projectArtifact(this);
     }

@@ -19,11 +19,12 @@ import com.mysql.cj.jdbc.ha.ReplicationConnection;
 import com.mysql.cj.jdbc.result.ResultSetInternalMethods;
 import com.mysql.cj.protocol.Resultset;
 
-import io.quarkus.agroal.spi.DefaultDataSourceDbKindBuildItem;
 import io.quarkus.agroal.spi.JdbcDriverBuildItem;
 import io.quarkus.arc.deployment.AdditionalBeanBuildItem;
 import io.quarkus.arc.processor.BuiltinScope;
 import io.quarkus.datasource.common.runtime.DatabaseKind;
+import io.quarkus.datasource.deployment.spi.DefaultDataSourceDbKindBuildItem;
+import io.quarkus.datasource.deployment.spi.DevServicesDatasourceConfigurationHandlerBuildItem;
 import io.quarkus.deployment.Capabilities;
 import io.quarkus.deployment.Capability;
 import io.quarkus.deployment.Feature;
@@ -31,14 +32,13 @@ import io.quarkus.deployment.annotations.BuildProducer;
 import io.quarkus.deployment.annotations.BuildStep;
 import io.quarkus.deployment.builditem.FeatureBuildItem;
 import io.quarkus.deployment.builditem.NativeImageEnableAllCharsetsBuildItem;
-import io.quarkus.deployment.builditem.NativeImageEnableAllTimeZonesBuildItem;
 import io.quarkus.deployment.builditem.SslNativeConfigBuildItem;
 import io.quarkus.deployment.builditem.SystemPropertyBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.NativeImageProxyDefinitionBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.NativeImageResourceBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.NativeImageSystemPropertyBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.ServiceProviderBuildItem;
-import io.quarkus.deployment.pkg.steps.NativeBuild;
+import io.quarkus.deployment.pkg.steps.NativeOrNativeSourcesBuild;
 import io.quarkus.jdbc.mysql.runtime.MySQLAgroalConnectionConfigurer;
 import io.quarkus.jdbc.mysql.runtime.MySQLServiceBindingConverter;
 
@@ -54,6 +54,11 @@ public class JDBCMySQLProcessor {
             SslNativeConfigBuildItem sslNativeConfigBuildItem) {
         jdbcDriver.produce(new JdbcDriverBuildItem(DatabaseKind.MYSQL, "com.mysql.cj.jdbc.Driver",
                 "com.mysql.cj.jdbc.MysqlXADataSource"));
+    }
+
+    @BuildStep
+    DevServicesDatasourceConfigurationHandlerBuildItem devDbHandler() {
+        return DevServicesDatasourceConfigurationHandlerBuildItem.jdbc(DatabaseKind.MYSQL);
     }
 
     @BuildStep
@@ -78,16 +83,11 @@ public class JDBCMySQLProcessor {
     }
 
     @BuildStep
-    NativeImageEnableAllTimeZonesBuildItem enableAllTimeZones() {
-        return new NativeImageEnableAllTimeZonesBuildItem();
-    }
-
-    @BuildStep
     NativeImageSystemPropertyBuildItem disableAbandonedConnectionCleanUpInNativeMode() {
         return new NativeImageSystemPropertyBuildItem("com.mysql.cj.disableAbandonedConnectionCleanup", "true");
     }
 
-    @BuildStep(onlyIfNot = NativeBuild.class)
+    @BuildStep(onlyIfNot = NativeOrNativeSourcesBuild.class)
     SystemPropertyBuildItem disableAbandonedConnectionCleanUpInJVMMode() {
         return new SystemPropertyBuildItem("com.mysql.cj.disableAbandonedConnectionCleanup", "true");
     }
@@ -126,7 +126,7 @@ public class JDBCMySQLProcessor {
             serviceProvider.produce(
                     new ServiceProviderBuildItem("io.quarkus.kubernetes.service.binding.runtime.ServiceBindingConverter",
                             MySQLServiceBindingConverter.class.getName()));
-            dbKind.produce(new DefaultDataSourceDbKindBuildItem(DatabaseKind.MYSQL));
         }
+        dbKind.produce(new DefaultDataSourceDbKindBuildItem(DatabaseKind.MYSQL));
     }
 }

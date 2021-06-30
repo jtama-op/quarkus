@@ -168,6 +168,22 @@ class FlywayCreatorTest {
     }
 
     @Test
+    @DisplayName("clean disabled default matches to false")
+    void testCleanDisabled() {
+        creator = new FlywayCreator(runtimeConfig, buildConfig);
+        assertEquals(runtimeConfig.cleanDisabled, createdFlywayConfig().isCleanDisabled());
+        assertFalse(runtimeConfig.cleanDisabled);
+
+        runtimeConfig.cleanDisabled = false;
+        creator = new FlywayCreator(runtimeConfig, buildConfig);
+        assertFalse(createdFlywayConfig().isCleanDisabled());
+
+        runtimeConfig.cleanDisabled = true;
+        creator = new FlywayCreator(runtimeConfig, buildConfig);
+        assertTrue(createdFlywayConfig().isCleanDisabled());
+    }
+
+    @Test
     @DisplayName("outOfOrder is correctly set")
     void testOutOfOrder() {
         runtimeConfig.outOfOrder = false;
@@ -189,6 +205,18 @@ class FlywayCreatorTest {
         runtimeConfig.ignoreMissingMigrations = true;
         creator = new FlywayCreator(runtimeConfig, buildConfig);
         assertTrue(createdFlywayConfig().isIgnoreMissingMigrations());
+    }
+
+    @Test
+    @DisplayName("ignoreFutureMigrations is correctly set")
+    void testIgnoreFutureMigrations() {
+        runtimeConfig.ignoreFutureMigrations = false;
+        creator = new FlywayCreator(runtimeConfig, buildConfig);
+        assertFalse(createdFlywayConfig().isIgnoreFutureMigrations());
+
+        runtimeConfig.ignoreFutureMigrations = true;
+        creator = new FlywayCreator(runtimeConfig, buildConfig);
+        assertTrue(createdFlywayConfig().isIgnoreFutureMigrations());
     }
 
     @ParameterizedTest

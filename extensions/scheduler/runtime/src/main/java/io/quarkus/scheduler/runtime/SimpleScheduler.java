@@ -7,7 +7,9 @@ import java.time.ZonedDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
@@ -17,12 +19,11 @@ import javax.annotation.PreDestroy;
 import javax.annotation.Priority;
 import javax.enterprise.event.Event;
 import javax.enterprise.event.Observes;
+import javax.enterprise.inject.Any;
 import javax.enterprise.inject.Typed;
 import javax.inject.Singleton;
 import javax.interceptor.Interceptor;
 
-import org.eclipse.microprofile.config.Config;
-import org.eclipse.microprofile.config.spi.ConfigProviderResolver;
 import org.jboss.logging.Logger;
 import org.jboss.threads.JBossScheduledThreadPoolExecutor;
 
@@ -32,6 +33,7 @@ import com.cronutils.model.definition.CronDefinitionBuilder;
 import com.cronutils.model.time.ExecutionTime;
 import com.cronutils.parser.CronParser;
 
+import io.quarkus.arc.Arc;
 import io.quarkus.runtime.StartupEvent;
 import io.quarkus.scheduler.Scheduled;
 import io.quarkus.scheduler.Scheduled.ConcurrentExecution;
@@ -39,12 +41,13 @@ import io.quarkus.scheduler.ScheduledExecution;
 import io.quarkus.scheduler.Scheduler;
 import io.quarkus.scheduler.SkippedExecution;
 import io.quarkus.scheduler.Trigger;
+import io.quarkus.scheduler.runtime.util.SchedulerUtils;
 
 @Typed(Scheduler.class)
 @Singleton
 public class SimpleScheduler implements Scheduler {
 
-    private static final Logger LOGGER = Logger.getLogger(SimpleScheduler.class);
+    private static final Logger LOG = Logger.getLogger(SimpleScheduler.class);
 
     // milliseconds
     private static final long CHECK_PERIOD = 1000L;
@@ -55,7 +58,7 @@ public class SimpleScheduler implements Scheduler {
     private final List<ScheduledTask> scheduledTasks;
     private final boolean enabled;
 
-    public SimpleScheduler(SchedulerContext context, Config config, SchedulerRuntimeConfig schedulerRuntimeConfig,
+    public SimpleScheduler(SchedulerContext context, SchedulerRuntimeConfig schedulerRuntimeConfig,
             Event<SkippedExecution> skippedExecutionEvent) {
         this.running = true;
         this.enabled = schedulerRuntimeConfig.enabled;
@@ -64,10 +67,10 @@ public class SimpleScheduler implements Scheduler {
 
         if (!schedulerRuntimeConfig.enabled) {
             this.scheduledExecutor = null;
-            LOGGER.info("Simple scheduler is disabled by config property and will not be started");
+            LOG.info("Simple scheduler is disabled by config property and will not be started");
         } else if (context.getScheduledMethods().isEmpty()) {
             this.scheduledExecutor = null;
-            LOGGER.info("No scheduled business methods found - Simple scheduler will not be started");
+            LOG.info("No scheduled business methods found - Simple scheduler will not be started");
         } else {
             this.scheduledExecutor = new JBossScheduledThreadPoolExecutor(1, new Runnable() {
                 @Override
@@ -83,13 +86,20 @@ public class SimpleScheduler implements Scheduler {
                 int nameSequence = 0;
                 for (Scheduled scheduled : method.getSchedules()) {
                     nameSequence++;
-                    SimpleTrigger trigger = createTrigger(method.getInvokerClassName(), parser, scheduled, nameSequence,
-                            config);
-                    ScheduledInvoker invoker = context.createInvoker(method.getInvokerClassName());
-                    if (scheduled.concurrentExecution() == ConcurrentExecution.SKIP) {
-                        invoker = new SkipConcurrentExecutionInvoker(invoker, skippedExecutionEvent);
+                    Optional<SimpleTrigger> trigger = createTrigger(method.getInvokerClassName(), parser, scheduled,
+                            nameSequence);
+                    if (trigger.isPresent()) {
+                        ScheduledInvoker invoker = context.createInvoker(method.getInvokerClassName());
+                        if (scheduled.concurrentExecution() == ConcurrentExecution.SKIP) {
+                            invoker = new SkipConcurrentExecutionInvoker(invoker, skippedExecutionEvent);
+                        }
+                        if (!scheduled.skipExecutionIf().equals(Scheduled.Never.class)) {
+                            invoker = new SkipPredicateInvoker(invoker,
+                                    Arc.container().select(scheduled.skipExecutionIf(), Any.Literal.INSTANCE).get(),
+                                    skippedExecutionEvent);
+                        }
+                        scheduledTasks.add(new ScheduledTask(trigger.get(), invoker));
                     }
-                    scheduledTasks.add(new ScheduledTask(trigger, invoker));
                 }
             }
         }
@@ -115,16 +125,17 @@ public class SimpleScheduler implements Scheduler {
                 scheduledExecutor.shutdownNow();
             }
         } catch (Exception e) {
-            LOGGER.warn("Unable to shutdown the scheduler executor", e);
+            LOG.warn("Unable to shutdown the scheduler executor", e);
         }
     }
 
     void checkTriggers() {
         if (!running) {
-            LOGGER.trace("Skip all triggers - scheduler paused");
+            LOG.trace("Skip all triggers - scheduler paused");
             return;
         }
         ZonedDateTime now = ZonedDateTime.now();
+        LOG.tracef("Check triggers at %s", now);
         for (ScheduledTask task : scheduledTasks) {
             task.execute(now, executor);
         }
@@ -133,18 +144,50 @@ public class SimpleScheduler implements Scheduler {
     @Override
     public void pause() {
         if (!enabled) {
-            LOGGER.warn("Scheduler is disabled and cannot be paused");
+            LOG.warn("Scheduler is disabled and cannot be paused");
         } else {
             running = false;
         }
     }
 
     @Override
+    public void pause(String identity) {
+        Objects.requireNonNull(identity, "Cannot pause - identity is null");
+        if (identity.isEmpty()) {
+            LOG.warn("Cannot pause - identity is empty");
+            return;
+        }
+        String parsedIdentity = SchedulerUtils.lookUpPropertyValue(identity);
+        for (ScheduledTask task : scheduledTasks) {
+            if (parsedIdentity.equals(task.trigger.id)) {
+                task.trigger.setRunning(false);
+                return;
+            }
+        }
+    }
+
+    @Override
     public void resume() {
         if (!enabled) {
-            LOGGER.warn("Scheduler is disabled and cannot be resumed");
+            LOG.warn("Scheduler is disabled and cannot be resumed");
         } else {
             running = true;
+        }
+    }
+
+    @Override
+    public void resume(String identity) {
+        Objects.requireNonNull(identity, "Cannot resume - identity is null");
+        if (identity.isEmpty()) {
+            LOG.warn("Cannot resume - identity is empty");
+            return;
+        }
+        String parsedIdentity = SchedulerUtils.lookUpPropertyValue(identity);
+        for (ScheduledTask task : scheduledTasks) {
+            if (parsedIdentity.equals(task.trigger.id)) {
+                task.trigger.setRunning(true);
+                return;
+            }
         }
     }
 
@@ -153,8 +196,8 @@ public class SimpleScheduler implements Scheduler {
         return enabled && running;
     }
 
-    SimpleTrigger createTrigger(String invokerClass, CronParser parser, Scheduled scheduled, int nameSequence, Config config) {
-        String id = scheduled.identity().trim();
+    Optional<SimpleTrigger> createTrigger(String invokerClass, CronParser parser, Scheduled scheduled, int nameSequence) {
+        String id = SchedulerUtils.lookUpPropertyValue(scheduled.identity());
         if (id.isEmpty()) {
             id = nameSequence + "_" + invokerClass;
         }
@@ -163,16 +206,16 @@ public class SimpleScheduler implements Scheduler {
         if (scheduled.delay() > 0) {
             millisToAdd = scheduled.delayUnit().toMillis(scheduled.delay());
         } else if (!scheduled.delayed().isEmpty()) {
-            millisToAdd = Math.abs(parseDuration(scheduled, scheduled.delayed(), "delayed").toMillis());
+            millisToAdd = SchedulerUtils.parseDelayedAsMillis(scheduled);
         }
         if (millisToAdd != null) {
             start = start.toInstant().plusMillis(millisToAdd).atZone(start.getZone());
         }
 
-        String cron = scheduled.cron().trim();
+        String cron = SchedulerUtils.lookUpPropertyValue(scheduled.cron());
         if (!cron.isEmpty()) {
-            if (SchedulerContext.isConfigValue(cron)) {
-                cron = config.getValue(SchedulerContext.getConfigProperty(cron), String.class);
+            if (SchedulerUtils.isOff(cron)) {
+                return Optional.empty();
             }
             Cron cronExpr;
             try {
@@ -180,29 +223,15 @@ public class SimpleScheduler implements Scheduler {
             } catch (IllegalArgumentException e) {
                 throw new IllegalArgumentException("Cannot parse cron expression: " + cron, e);
             }
-            return new CronTrigger(id, start, cronExpr);
+            return Optional.of(new CronTrigger(id, start, cronExpr));
         } else if (!scheduled.every().isEmpty()) {
-            return new IntervalTrigger(id, start, Math.abs(parseDuration(scheduled, scheduled.every(), "every").toMillis()));
+            final OptionalLong everyMillis = SchedulerUtils.parseEveryAsMillis(scheduled);
+            if (!everyMillis.isPresent()) {
+                return Optional.empty();
+            }
+            return Optional.of(new IntervalTrigger(id, start, everyMillis.getAsLong()));
         } else {
             throw new IllegalArgumentException("Invalid schedule configuration: " + scheduled);
-        }
-    }
-
-    // Keep it public so that we can reuse the logic in the quartz extension
-    public static Duration parseDuration(Scheduled scheduled, String value, String memberName) {
-        value = value.trim();
-        if (SchedulerContext.isConfigValue(value)) {
-            value = ConfigProviderResolver.instance().getConfig().getValue(SchedulerContext.getConfigProperty(value),
-                    String.class);
-        }
-        if (Character.isDigit(value.charAt(0))) {
-            value = "PT" + value;
-        }
-        try {
-            return Duration.parse(value);
-        } catch (Exception e) {
-            // This could only happen for config-based expressions
-            throw new IllegalStateException("Invalid " + memberName + "() expression on: " + scheduled, e);
         }
     }
 
@@ -217,6 +246,9 @@ public class SimpleScheduler implements Scheduler {
         }
 
         void execute(ZonedDateTime now, ExecutorService executor) {
+            if (!trigger.isRunning()) {
+                return;
+            }
             ZonedDateTime scheduledFireTime = trigger.evaluate(now);
             if (scheduledFireTime != null) {
                 try {
@@ -226,13 +258,12 @@ public class SimpleScheduler implements Scheduler {
                             try {
                                 invoker.invoke(new SimpleScheduledExecution(now, scheduledFireTime, trigger));
                             } catch (Throwable t) {
-                                LOGGER.errorf(t, "Error occured while executing task for trigger %s", trigger);
+                                LOG.errorf(t, "Error occured while executing task for trigger %s", trigger);
                             }
                         }
                     });
-                    LOGGER.debugf("Executing scheduled task for trigger %s", trigger);
                 } catch (RejectedExecutionException e) {
-                    LOGGER.warnf("Rejected execution of a scheduled task for trigger %s", trigger);
+                    LOG.warnf("Rejected execution of a scheduled task for trigger %s", trigger);
                 }
             }
         }
@@ -242,11 +273,14 @@ public class SimpleScheduler implements Scheduler {
     static abstract class SimpleTrigger implements Trigger {
 
         private final String id;
+        private volatile boolean running;
         protected final ZonedDateTime start;
+        protected volatile ZonedDateTime lastFireTime;
 
-        public SimpleTrigger(String id, ZonedDateTime start) {
+        SimpleTrigger(String id, ZonedDateTime start) {
             this.id = id;
             this.start = start;
+            this.running = true;
         }
 
         /**
@@ -260,14 +294,22 @@ public class SimpleScheduler implements Scheduler {
             return id;
         }
 
+        public synchronized boolean isRunning() {
+            return running;
+        }
+
+        public synchronized void setRunning(boolean running) {
+            this.running = running;
+        }
+
     }
 
     static class IntervalTrigger extends SimpleTrigger {
 
+        // milliseconds
         private final long interval;
-        private volatile ZonedDateTime lastFireTime;
 
-        public IntervalTrigger(String id, ZonedDateTime start, long interval) {
+        IntervalTrigger(String id, ZonedDateTime start, long interval) {
             super(id, start);
             this.interval = interval;
         }
@@ -282,9 +324,11 @@ public class SimpleScheduler implements Scheduler {
                 lastFireTime = now.truncatedTo(ChronoUnit.SECONDS);
                 return now;
             }
-            if (ChronoUnit.MILLIS.between(lastFireTime, now) >= interval) {
+            long diff = ChronoUnit.MILLIS.between(lastFireTime, now);
+            if (diff >= interval) {
                 ZonedDateTime scheduledFireTime = lastFireTime.plus(Duration.ofMillis(interval));
                 lastFireTime = now.truncatedTo(ChronoUnit.SECONDS);
+                LOG.tracef("%s fired, diff=%s ms", this, diff);
                 return scheduledFireTime;
             }
             return null;
@@ -311,16 +355,14 @@ public class SimpleScheduler implements Scheduler {
 
     static class CronTrigger extends SimpleTrigger {
 
-        // microseconds
-        private static final long DIFF_THRESHOLD = CHECK_PERIOD * 1000;
-
         private final Cron cron;
         private final ExecutionTime executionTime;
 
-        public CronTrigger(String id, ZonedDateTime start, Cron cron) {
+        CronTrigger(String id, ZonedDateTime start, Cron cron) {
             super(id, start);
             this.cron = cron;
             this.executionTime = ExecutionTime.forCron(cron);
+            this.lastFireTime = ZonedDateTime.now();
         }
 
         @Override
@@ -339,17 +381,13 @@ public class SimpleScheduler implements Scheduler {
             if (now.isBefore(start)) {
                 return null;
             }
-            Optional<ZonedDateTime> lastFireTime = executionTime.lastExecution(now);
-            if (lastFireTime.isPresent()) {
-                ZonedDateTime trunc = lastFireTime.get().truncatedTo(ChronoUnit.SECONDS);
-                if (now.isBefore(trunc)) {
-                    return null;
-                }
-                // Use microseconds precision to workaround incompatibility between jdk8 and jdk9+
-                long diff = ChronoUnit.MICROS.between(trunc, now);
-                if (diff <= DIFF_THRESHOLD) {
-                    LOGGER.debugf("%s fired, diff=%s μs", this, diff);
-                    return trunc;
+            Optional<ZonedDateTime> lastExecution = executionTime.lastExecution(now);
+            if (lastExecution.isPresent()) {
+                ZonedDateTime lastTruncated = lastExecution.get().truncatedTo(ChronoUnit.SECONDS);
+                if (now.isAfter(lastTruncated) && lastFireTime.isBefore(lastTruncated)) {
+                    LOG.tracef("%s fired, last=", this, lastTruncated);
+                    lastFireTime = now;
+                    return lastTruncated;
                 }
             }
             return null;

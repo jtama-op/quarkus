@@ -1,7 +1,7 @@
 ////
 This guide is maintained in the main Quarkus repository
 and pull requests should be submitted there:
-https://github.com/quarkusio/quarkus/tree/master/docs/src/main/asciidoc
+https://github.com/quarkusio/quarkus/tree/main/docs/src/main/asciidoc
 ////
 = Quarkus - Using Apache Kafka Streams
 
@@ -15,7 +15,7 @@ To complete this guide, you need:
 
 * less than 30 minutes
 * an IDE
-* JDK 1.8+ installed with `JAVA_HOME` configured appropriately
+* JDK 11+ installed with `JAVA_HOME` configured appropriately
 * Apache Maven {maven-version}
 * Docker Compose to start an Apache Kafka development cluster
 * GraalVM installed if you want to run in native mode.
@@ -52,7 +52,7 @@ Together, these settings will ensure that the application can very quickly recon
 
 In this guide, we are going to generate (random) temperature values in one component (named `generator`).
 These values are associated to given weather stations and are written in a Kafka topic (`temperature-values`).
-Another topic (`weather-stations`) contains just the master data about the weather stations themselves (id and name).
+Another topic (`weather-stations`) contains just the main data about the weather stations themselves (id and name).
 
 A second component (`aggregator`) reads from the two Kafka topics and processes them in a streaming pipeline:
 
@@ -66,7 +66,7 @@ the latest result for each weather station can alternatively be obtained via a s
 
 The overall architecture looks like so:
 
-image::kafka-streams-guide-architecture.png[alt=Architecture]
+image::kafka-streams-guide-architecture.png[alt=Architecture, align=center, width=90%]
 
 == Solution
 
@@ -287,7 +287,7 @@ public class WeatherStation {
     public String name;
 }
 ----
-<1> By adding the `@RegisterForReflection` annotation, it is ensured that this type can be instantiated reflectively when running the application in native mode.
+<1> The `@RegisterForReflection` annotation instructs Quarkus to keep the class and its members during the native compilation. More details about the `@RegisterForReflection` annotation can be found on  the xref:writing-native-applications-tips.adoc#registerForReflection[native application tips] page.
 
 Then the file `aggregator/src/main/java/org/acme/kafka/streams/aggregator/model/TemperatureMeasurement.java`,
 representing temperature measurements for a given station:
@@ -808,7 +808,7 @@ The application can then either fetch the data directly from the other instance,
 
 Launching multiple instances of the `aggregator` application will make look the overall architecture like so:
 
-image::kafka-streams-guide-architecture-distributed.png[alt=Architecture with multiple aggregator nodes]
+image::kafka-streams-guide-architecture-distributed.png[alt=Architecture with multiple aggregator nodes, align=center, width=90%]
 
 The `InteractiveQueries` class must be adjusted slightly for this distributed architecture:
 
@@ -1252,7 +1252,7 @@ content-length: 265
 This guide has shown how you can build stream processing applications using Quarkus and the Kafka Streams APIs,
 both in JVM and native modes.
 For running your KStreams application in production, you could also add health checks and metrics for the data pipeline.
-Refer to the Quarkus guides on link:micrometer[Micrometer], link:microprofile-metrics[MicroProfile Metrics], and link:microprofile-health[health checks] to learn more.
+Refer to the Quarkus guides on link:micrometer[Micrometer], link:smallrye-metrics[SmallRye Metrics], and link:smallrye-health[SmallRye Health] to learn more.
 
 == Configuration Reference
 

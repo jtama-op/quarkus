@@ -17,13 +17,14 @@ import io.quarkus.deployment.builditem.JniBuildItem;
 import io.quarkus.deployment.builditem.NativeImageEnableAllCharsetsBuildItem;
 import io.quarkus.deployment.builditem.SslNativeConfigBuildItem;
 import io.quarkus.deployment.builditem.SystemPropertyBuildItem;
+import io.quarkus.deployment.builditem.nativeimage.InlineBeforeAnalysisBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.NativeImageConfigBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.NativeImageProxyDefinitionBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.NativeImageResourceBundleBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.NativeImageSystemPropertyBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.RuntimeInitializedClassBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.RuntimeReinitializedClassBuildItem;
-import io.quarkus.deployment.pkg.steps.NativeBuild;
+import io.quarkus.deployment.pkg.steps.NativeOrNativeSourcesBuild;
 import io.quarkus.runtime.ssl.SslContextConfigurationRecorder;
 
 //TODO: this should go away, once we decide on which one of the API's we want
@@ -40,6 +41,7 @@ class NativeImageConfigBuildStep {
             List<NativeImageEnableAllCharsetsBuildItem> nativeImageEnableAllCharsetsBuildItems,
             List<ExtensionSslNativeSupportBuildItem> extensionSslNativeSupport,
             List<EnableAllSecurityServicesBuildItem> enableAllSecurityServicesBuildItems,
+            List<InlineBeforeAnalysisBuildItem> inlineBeforeAnalysisBuildItems,
             BuildProducer<NativeImageProxyDefinitionBuildItem> proxy,
             BuildProducer<NativeImageResourceBundleBuildItem> resourceBundle,
             BuildProducer<RuntimeInitializedClassBuildItem> runtimeInit,
@@ -76,6 +78,10 @@ class NativeImageConfigBuildStep {
             nativeImage.produce(new NativeImageSystemPropertyBuildItem("quarkus.native.enable-all-security-services", "true"));
         }
 
+        if (!inlineBeforeAnalysisBuildItems.isEmpty()) {
+            nativeImage.produce(new NativeImageSystemPropertyBuildItem("quarkus.native.inline-before-analysis", "true"));
+        }
+
         for (JniBuildItem jniBuildItem : jniBuildItems) {
             if (jniBuildItem.getLibraryPaths() != null && !jniBuildItem.getLibraryPaths().isEmpty()) {
                 for (String path : jniBuildItem.getLibraryPaths()) {
@@ -89,7 +95,7 @@ class NativeImageConfigBuildStep {
         }
     }
 
-    @BuildStep(onlyIf = NativeBuild.class)
+    @BuildStep(onlyIf = NativeOrNativeSourcesBuild.class)
     void reinitHostNameUtil(BuildProducer<RuntimeReinitializedClassBuildItem> runtimeReInitClass) {
         // certain libraries like JBoss logging internally use this class to determine the hostname
         // of the system. This HostName class computes and stores the hostname as a static field in a class,

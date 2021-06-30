@@ -11,6 +11,7 @@ import java.util.List;
 
 import org.jboss.shrinkwrap.api.ShrinkWrap;
 import org.jboss.shrinkwrap.api.spec.JavaArchive;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 
@@ -79,6 +80,7 @@ public class BasicKubernetesTest {
                         assertThat(podSpec.getContainers()).singleElement().satisfies(container -> {
                             assertThat(container.getImagePullPolicy()).isEqualTo("Always"); // expect the default value
                             assertThat(container.getPorts()).singleElement().satisfies(p -> {
+
                                 assertThat(p.getContainerPort()).isEqualTo(8080);
                             });
                         });
@@ -96,9 +98,17 @@ public class BasicKubernetesTest {
                         entry("app.kubernetes.io/version", "0.1-SNAPSHOT"));
 
                 assertThat(spec.getPorts()).hasSize(1).singleElement().satisfies(p -> {
-                    assertThat(p.getPort()).isEqualTo(8080);
+                    assertThat(p.getPort()).isEqualTo(80);
+                    assertThat(p.getTargetPort().getIntVal()).isEqualTo(8080);
                 });
             });
         });
+    }
+
+    @Disabled("flaky")
+    @Test
+    public void assertDependencies() {
+        Path mainDepsPath = prodModeTestResults.getBuildDir().resolve("quarkus-app").resolve("lib").resolve("main");
+        assertThat(mainDepsPath).isDirectoryNotContaining(p -> p.getFileName().toString().contains("kubernetes-client"));
     }
 }

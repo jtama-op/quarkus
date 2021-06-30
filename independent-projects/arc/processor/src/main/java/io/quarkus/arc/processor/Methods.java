@@ -4,6 +4,7 @@ import static io.quarkus.arc.processor.IndexClassLookupUtils.getClassByName;
 
 import io.quarkus.gizmo.DescriptorUtils;
 import io.quarkus.gizmo.Gizmo;
+import io.quarkus.gizmo.MethodDescriptor;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -68,8 +69,8 @@ final class Methods {
 
     static void addDelegatingMethods(IndexView index, ClassInfo classInfo, Map<MethodKey, MethodInfo> methods,
             Set<NameAndDescriptor> methodsFromWhichToRemoveFinal, boolean transformUnproxyableClasses) {
-        // TODO support interfaces default methods
         if (classInfo != null) {
+            // First methods declared on the class
             for (MethodInfo method : classInfo.methods()) {
                 if (skipForClientProxy(method, transformUnproxyableClasses, methodsFromWhichToRemoveFinal)) {
                     continue;
@@ -87,18 +88,20 @@ final class Methods {
                             key.method.exceptions().toArray(Type.EMPTY_ARRAY));
                 });
             }
-            // Interfaces
-            for (Type interfaceType : classInfo.interfaceTypes()) {
-                ClassInfo interfaceClassInfo = getClassByName(index, interfaceType.name());
-                if (interfaceClassInfo != null) {
-                    addDelegatingMethods(index, interfaceClassInfo, methods, methodsFromWhichToRemoveFinal,
-                            transformUnproxyableClasses);
-                }
-            }
+            // Methods declared on superclasses
             if (classInfo.superClassType() != null) {
                 ClassInfo superClassInfo = getClassByName(index, classInfo.superName());
                 if (superClassInfo != null) {
                     addDelegatingMethods(index, superClassInfo, methods, methodsFromWhichToRemoveFinal,
+                            transformUnproxyableClasses);
+                }
+            }
+            // Methods declared on implemented interfaces
+            // TODO support interfaces default methods
+            for (DotName interfaceName : classInfo.interfaceNames()) {
+                ClassInfo interfaceClassInfo = getClassByName(index, interfaceName);
+                if (interfaceClassInfo != null) {
+                    addDelegatingMethods(index, interfaceClassInfo, methods, methodsFromWhichToRemoveFinal,
                             transformUnproxyableClasses);
                 }
             }
@@ -134,6 +137,20 @@ final class Methods {
         return false;
     }
 
+    static boolean skipForDelegateSubclass(MethodInfo method) {
+        if (Modifier.isStatic(method.flags())) {
+            return true;
+        }
+        if (IGNORED_METHODS.contains(method.name())) {
+            return true;
+        }
+        // skip all Object methods
+        if (method.declaringClass().name().equals(DotNames.OBJECT)) {
+            return true;
+        }
+        return false;
+    }
+
     static boolean isObjectToString(MethodInfo method) {
         return method.declaringClass().name().equals(DotNames.OBJECT) && method.name().equals(TO_STRING);
     }
@@ -143,7 +160,8 @@ final class Methods {
             List<AnnotationInstance> classLevelBindings, Consumer<BytecodeTransformer> bytecodeTransformerConsumer,
             boolean transformUnproxyableClasses) {
         return addInterceptedMethodCandidates(beanDeployment, classInfo, candidates, classLevelBindings,
-                bytecodeTransformerConsumer, transformUnproxyableClasses, new SubclassSkipPredicate(), false);
+                bytecodeTransformerConsumer, transformUnproxyableClasses,
+                new SubclassSkipPredicate(beanDeployment.getAssignabilityCheck()::isAssignableFrom), false);
     }
 
     static Set<MethodInfo> addInterceptedMethodCandidates(BeanDeployment beanDeployment, ClassInfo classInfo,
@@ -261,11 +279,13 @@ final class Methods {
 
         final String name;
         final List<DotName> params;
+        final DotName returnType;
         final MethodInfo method;
 
         public MethodKey(MethodInfo method) {
-            this.method = method;
+            this.method = Objects.requireNonNull(method, "Method must not be null");
             this.name = method.name();
+            this.returnType = method.returnType().name();
             this.params = new ArrayList<>();
             for (Type i : method.parameters()) {
                 params.add(i.name());
@@ -276,8 +296,9 @@ final class Methods {
         public int hashCode() {
             final int prime = 31;
             int result = 1;
-            result = prime * result + ((name == null) ? 0 : name.hashCode());
-            result = prime * result + ((params == null) ? 0 : params.hashCode());
+            result = prime * result + name.hashCode();
+            result = prime * result + params.hashCode();
+            result = prime * result + returnType.hashCode();
             return result;
         }
 
@@ -297,6 +318,9 @@ final class Methods {
                 return false;
             }
             if (!params.equals(other.params)) {
+                return false;
+            }
+            if (!returnType.equals(other.returnType)) {
                 return false;
             }
             return true;
@@ -362,6 +386,39 @@ final class Methods {
         }
     }
 
+    static void addDelegateTypeMethods(IndexView index, ClassInfo delegateTypeClass, List<MethodInfo> methods) {
+        if (delegateTypeClass != null) {
+            for (MethodInfo method : delegateTypeClass.methods()) {
+                if (skipForDelegateSubclass(method)) {
+                    continue;
+                }
+                methods.add(method);
+            }
+            // Interfaces
+            for (Type interfaceType : delegateTypeClass.interfaceTypes()) {
+                ClassInfo interfaceClassInfo = getClassByName(index, interfaceType.name());
+                if (interfaceClassInfo != null) {
+                    addDelegateTypeMethods(index, interfaceClassInfo, methods);
+                }
+            }
+            if (delegateTypeClass.superClassType() != null) {
+                ClassInfo superClassInfo = getClassByName(index, delegateTypeClass.superName());
+                if (superClassInfo != null) {
+                    addDelegateTypeMethods(index, superClassInfo, methods);
+                }
+            }
+        }
+    }
+
+    static boolean containsTypeVariableParameter(MethodInfo method) {
+        for (Type param : method.parameters()) {
+            if (Types.containsTypeVariable(param)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     static class RemoveFinalFromMethod implements BiFunction<String, ClassVisitor, ClassVisitor> {
 
         private final String classToTransform;
@@ -396,9 +453,14 @@ final class Methods {
      */
     static class SubclassSkipPredicate implements Predicate<MethodInfo> {
 
+        private final BiFunction<Type, Type, Boolean> assignableFromFun;
         private ClassInfo clazz;
         private List<MethodInfo> regularMethods;
         private Set<MethodInfo> bridgeMethods = new HashSet<>();
+
+        public SubclassSkipPredicate(BiFunction<Type, Type, Boolean> assignableFromFun) {
+            this.assignableFromFun = assignableFromFun;
+        }
 
         void startProcessing(ClassInfo clazz) {
             this.clazz = clazz;
@@ -459,8 +521,7 @@ final class Methods {
                     for (int i = 0; i < bridgeParams.size(); i++) {
                         Type bridgeParam = bridgeParams.get(i);
                         Type param = params.get(i);
-                        if (param.name().equals(bridgeParam.name())
-                                || bridgeParam.name().equals(DotNames.OBJECT)) {
+                        if (assignableFromFun.apply(bridgeParam, param)) {
                             continue;
                         } else {
                             paramsNotMatching = true;
@@ -477,8 +538,8 @@ final class Methods {
                             // both cases are a match
                             return true;
                         } else {
-                            // as a last resort, we simply check equality of return Type
-                            return bridge.returnType().name().equals(declaredMethod.returnType().name());
+                            // as a last resort, we simply check assignability of the return type
+                            return assignableFromFun.apply(bridge.returnType(), declaredMethod.returnType());
                         }
                     }
                     return true;
@@ -533,6 +594,11 @@ final class Methods {
             }
             return true;
         }
+    }
+
+    static boolean descriptorMatches(MethodDescriptor d1, MethodDescriptor d2) {
+        return d1.getName().equals(d2.getName())
+                && d1.getDescriptor().equals(d2.getDescriptor());
     }
 
 }

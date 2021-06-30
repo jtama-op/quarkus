@@ -46,6 +46,10 @@ public class StreamTestCase {
                 .then()
                 .statusCode(200)
                 .body(Matchers.equalTo("foobar"));
+        RestAssured.get("/stream/text/stream/publisher")
+                .then()
+                .statusCode(200)
+                .body(Matchers.equalTo("foobar"));
         RestAssured.get("/stream/text/collect")
                 .then()
                 .statusCode(200)
@@ -61,6 +65,10 @@ public class StreamTestCase {
                 .body(Matchers.equalTo("foobar"));
 
         RestAssured.get("/stream/char-arrays/stream")
+                .then()
+                .statusCode(200)
+                .body(Matchers.equalTo("foobar"));
+        RestAssured.get("/stream/char-arrays/stream/publisher")
                 .then()
                 .statusCode(200)
                 .body(Matchers.equalTo("foobar"));
@@ -84,7 +92,7 @@ public class StreamTestCase {
         Client client = ClientBuilder.newBuilder().build();
         WebTarget target = client.target(uri.toString() + "stream/text/stream");
         Multi<String> multi = target.request().rx(MultiInvoker.class).get(String.class);
-        List<String> list = multi.collectItems().asList().await().atMost(Duration.ofSeconds(5));
+        List<String> list = multi.collect().asList().await().atMost(Duration.ofSeconds(5));
         Assertions.assertEquals(2, list.size());
         Assertions.assertEquals("foo", list.get(0));
         Assertions.assertEquals("bar", list.get(1));

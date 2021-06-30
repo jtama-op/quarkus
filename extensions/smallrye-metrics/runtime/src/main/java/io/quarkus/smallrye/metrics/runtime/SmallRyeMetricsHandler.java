@@ -31,9 +31,11 @@ public class SmallRyeMetricsHandler implements Handler<RoutingContext> {
         HttpServerResponse response = routingContext.response();
         HttpServerRequest request = routingContext.request();
         Stream<String> acceptHeaders = request.headers().getAll("Accept").stream();
+        routingContext.currentRoute().getPath();
+        routingContext.mountPoint();
 
         try {
-            internalHandler.handleRequest(request.path(), metricsPath, request.rawMethod(), acceptHeaders,
+            internalHandler.handleRequest(request.path(), metricsPath, request.method().name(), acceptHeaders,
                     new MetricsRequestHandler.Responder() {
                         @Override
                         public void respondWith(int status, String message, Map<String, String> headers) throws IOException {

@@ -14,12 +14,26 @@
     <name>Quarkus - Container Image - Docker</name>
     <description>Build container images of your application using Docker</description>
 
+    <dependencies>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-container-image</artifactId>
+        </dependency>
+    </dependencies>
 
     <build>
         <plugins>
             <plugin>
                 <groupId>io.quarkus</groupId>
                 <artifactId>quarkus-bootstrap-maven-plugin</artifactId>
+                <configuration>
+                    <capabilities>
+                        <providesIf>
+                            <positive>io.quarkus.container.image.docker.deployment.DockerBuild</positive>
+                            <name>io.quarkus.container.image.docker</name>
+                        </providesIf>
+                    </capabilities>
+                </configuration>
             </plugin>
             <plugin>
                 <artifactId>maven-compiler-plugin</artifactId>

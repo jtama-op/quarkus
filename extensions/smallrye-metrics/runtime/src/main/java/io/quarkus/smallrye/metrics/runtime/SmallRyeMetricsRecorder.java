@@ -14,9 +14,7 @@ import java.lang.management.ThreadMXBean;
 import java.util.Arrays;
 import java.util.List;
 import java.util.function.Consumer;
-import java.util.function.Function;
 
-import javax.enterprise.inject.spi.BeanManager;
 import javax.enterprise.inject.spi.CDI;
 
 import org.eclipse.microprofile.metrics.ConcurrentGauge;
@@ -25,7 +23,6 @@ import org.eclipse.microprofile.metrics.Gauge;
 import org.eclipse.microprofile.metrics.Histogram;
 import org.eclipse.microprofile.metrics.Metadata;
 import org.eclipse.microprofile.metrics.Metered;
-import org.eclipse.microprofile.metrics.Metric;
 import org.eclipse.microprofile.metrics.MetricRegistry;
 import org.eclipse.microprofile.metrics.MetricType;
 import org.eclipse.microprofile.metrics.MetricUnits;
@@ -34,9 +31,6 @@ import org.eclipse.microprofile.metrics.Timer;
 import org.graalvm.nativeimage.ImageInfo;
 import org.jboss.logging.Logger;
 
-import io.quarkus.arc.Arc;
-import io.quarkus.arc.ArcContainer;
-import io.quarkus.arc.InjectableBean;
 import io.quarkus.arc.runtime.BeanContainer;
 import io.quarkus.runtime.ShutdownContext;
 import io.quarkus.runtime.annotations.Recorder;
@@ -45,13 +39,10 @@ import io.smallrye.metrics.ExtendedMetadata;
 import io.smallrye.metrics.ExtendedMetadataBuilder;
 import io.smallrye.metrics.MetricRegistries;
 import io.smallrye.metrics.MetricsRequestHandler;
-import io.smallrye.metrics.TagsUtils;
 import io.smallrye.metrics.elementdesc.BeanInfo;
 import io.smallrye.metrics.elementdesc.MemberInfo;
 import io.smallrye.metrics.interceptors.MetricResolver;
 import io.smallrye.metrics.setup.MetricsMetadata;
-import io.vertx.ext.web.Route;
-import io.vertx.ext.web.Router;
 
 @Recorder
 public class SmallRyeMetricsRecorder {
@@ -89,15 +80,6 @@ public class SmallRyeMetricsRecorder {
     private static final String MEMORY_USED_NON_HEAP = "memory.usedNonHeap";
 
     private static final SmallRyeMetricsFactory factory = new SmallRyeMetricsFactory();
-
-    public Function<Router, Route> route(String name) {
-        return new Function<Router, Route>() {
-            @Override
-            public Route apply(Router router) {
-                return router.route(name);
-            }
-        };
-    }
 
     public SmallRyeMetricsHandler handler(String metricsPath) {
         SmallRyeMetricsHandler handler = new SmallRyeMetricsHandler();
@@ -142,26 +124,6 @@ public class SmallRyeMetricsRecorder {
                 new MetricResolver(),
                 beanInfo,
                 memberInfo);
-    }
-
-    public void registerMetricFromProducer(String beanId, MetricType metricType,
-            String metricName, String[] tags, String description,
-            String displayName, String unit) {
-        ArcContainer container = Arc.container();
-        InjectableBean<Object> injectableBean = container.bean(beanId);
-        BeanManager beanManager = container.beanManager();
-        Metric reference = (Metric) beanManager.getReference(injectableBean, Metric.class,
-                beanManager.createCreationalContext(injectableBean));
-        MetricRegistry registry = MetricRegistries.get(MetricRegistry.Type.APPLICATION);
-        Metadata metadata = Metadata.builder()
-                .withType(metricType)
-                .withName(metricName)
-                .withDescription(description)
-                .withDisplayName(displayName)
-                .withUnit(unit)
-                .notReusable()
-                .build();
-        registry.register(metadata, reference, TagsUtils.parseTagsAsArray(tags));
     }
 
     public void registerMetric(MetricRegistry.Type scope,

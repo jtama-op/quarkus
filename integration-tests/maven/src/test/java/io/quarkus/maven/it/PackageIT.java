@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -41,23 +42,6 @@ public class PackageIT extends MojoTestBase {
         assertThat(result.getProcess().waitFor()).isEqualTo(0);
 
         verifyUberJar();
-    }
-
-    @Test
-    public void testPackageWorksWhenUberjarIsFalse()
-            throws MavenInvocationException, IOException, InterruptedException {
-        testDir = initProject("projects/uberjar-check", "projects/project-uberjar-false");
-
-        running = new RunningInvoker(testDir, false);
-        final MavenProcessInvocationResult result = running.execute(Collections.singletonList("package"),
-                Collections.singletonMap("QUARKUS_PACKAGE_UBER_JAR", "false"));
-
-        assertThat(result.getProcess().waitFor()).isEqualTo(0);
-
-        File runnerJar = getTargetDir().toPath().resolve("quarkus-app").resolve("quarkus-run.jar").toFile();
-
-        // make sure the jar can be read by JarInputStream
-        ensureManifestOfJarIsReadableByJarInputStream(runnerJar);
     }
 
     private void ensureManifestOfJarIsReadableByJarInputStream(File jar) throws IOException {
@@ -116,7 +100,7 @@ public class PackageIT extends MojoTestBase {
     @Test
     public void testPackageWorksWhenUberjarIsTrue()
             throws MavenInvocationException, IOException, InterruptedException {
-        testDir = initProject("projects/uberjar-check", "projects/project-uberjar-true");
+        testDir = initProject("projects/uberjar-check");
 
         createAndVerifyUberJar();
         // ensure that subsequent package without clean also works
@@ -125,7 +109,7 @@ public class PackageIT extends MojoTestBase {
 
     private void createAndVerifyUberJar() throws IOException, MavenInvocationException, InterruptedException {
         Properties p = new Properties();
-        p.setProperty("quarkus.package.uber-jar", "true");
+        p.setProperty("quarkus.package.type", "uber-jar");
 
         running = new RunningInvoker(testDir, false);
         final MavenProcessInvocationResult result = running.execute(Collections.singletonList("package"),
@@ -183,12 +167,12 @@ public class PackageIT extends MojoTestBase {
      */
     @Test
     public void testRunnerUberJarHasValidCRC() throws Exception {
-        testDir = initProject("projects/uberjar-check", "projects/project-uberjar-true2");
+        testDir = initProject("projects/uberjar-check", "projects/project-uberjar-crc");
 
         running = new RunningInvoker(testDir, false);
 
         Properties p = new Properties();
-        p.setProperty("quarkus.package.uber-jar", "true");
+        p.setProperty("quarkus.package.type", "uber-jar");
         final MavenProcessInvocationResult result = running.execute(Collections.singletonList("package"),
                 Collections.emptyMap(), p);
         assertThat(result.getProcess().waitFor()).isEqualTo(0);
@@ -212,7 +196,7 @@ public class PackageIT extends MojoTestBase {
      */
     @Test
     public void testLegacyJarHasValidCRC() throws Exception {
-        testDir = initProject("projects/uberjar-check", "projects/project-uberjar-false2");
+        testDir = initProject("projects/uberjar-check", "projects/project-legacyjar-crc");
 
         running = new RunningInvoker(testDir, false);
         final MavenProcessInvocationResult result = running.execute(Collections.singletonList("package"),
@@ -238,7 +222,7 @@ public class PackageIT extends MojoTestBase {
      */
     @Test
     public void testFastJarHasValidCRC() throws Exception {
-        testDir = initProject("projects/uberjar-check", "projects/project-uberjar-false2");
+        testDir = initProject("projects/uberjar-check", "projects/project-fastjar-crc");
 
         running = new RunningInvoker(testDir, false);
         final MavenProcessInvocationResult result = running.execute(Collections.singletonList("package"),
@@ -269,6 +253,26 @@ public class PackageIT extends MojoTestBase {
         final Path runnerJar = targetDir.toPath().resolve("quarkus-app").resolve("quarkus-run.jar");
         Assertions.assertTrue(Files.exists(runnerJar), "Runner jar " + runnerJar + " is missing");
         assertZipEntriesCanBeOpenedAndClosed(runnerJar);
+    }
+
+    @Test
+    public void testNativeSourcesPackage() throws Exception {
+        testDir = initProject("projects/uberjar-check", "projects/project-native-sources");
+
+        running = new RunningInvoker(testDir, false);
+        final MavenProcessInvocationResult result = running.execute(
+                Arrays.asList("package", "-Dquarkus.package.type=native-sources"),
+                Collections.emptyMap());
+
+        assertThat(result.getProcess().waitFor()).isEqualTo(0);
+
+        final File targetDir = getTargetDir();
+
+        final Path nativeSourcesDir = targetDir.toPath().resolve("native-sources");
+        assertThat(nativeSourcesDir).exists()
+                .isDirectoryContaining(p -> "native-image.args".equals(p.getFileName().toString()))
+                .isDirectoryContaining(p -> "acme-1.0-SNAPSHOT-runner.jar".equals(p.getFileName().toString()));
+
     }
 
     private int getNumberOfFilesEndingWith(File dir, String suffix) {

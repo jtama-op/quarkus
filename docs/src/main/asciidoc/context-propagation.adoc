@@ -1,7 +1,7 @@
 ////
 This guide is maintained in the main Quarkus repository
 and pull requests should be submitted there:
-https://github.com/quarkusio/quarkus/tree/master/docs/src/main/asciidoc
+https://github.com/quarkusio/quarkus/tree/main/docs/src/main/asciidoc
 ////
 = Context Propagation in Quarkus
 
@@ -18,9 +18,19 @@ If you write reactive/async code, you have to cut your work into a pipeline of c
 as well as `ThreadLocal` variables stop working, because your reactive code gets executed in another thread,
 after the caller ran its `finally` block.
 
+link:https://github.com/smallrye/smallrye-context-propagation[SmallRye Context Propagation] an implementation of
 link:https://github.com/eclipse/microprofile-context-propagation[MicroProfile Context Propagation] was made to
 make those Quarkus extensions work properly in reactive/async settings. It works by capturing those contextual
 values that used to be in thread-locals, and restoring them when your code is called.
+
+== Solution
+
+We recommend that you follow the instructions in the next sections and create the application step by step.
+However, you can go right to the completed example.
+
+Clone the Git repository: `git clone {quickstarts-clone-url}`, or download an {quickstarts-archive-url}[archive].
+
+The solution is located in the `context-propagation-quickstart` {quickstarts-tree-url}/context-propagation-quickstart[directory].
 
 == Setting it up
 
@@ -56,7 +66,8 @@ With this, you will get context propagation for ArC, RESTEasy and transactions, 
 [TIP]
 .Mutiny
 ====
-This section uses Mutiny reactive types, if you're not familiar with them, read the link:getting-started-reactive#mutiny[Getting Started with Reactive guide] first.
+This section uses Mutiny reactive types.
+If you are not familiar with Mutiny, check xref:mutiny-primer.adoc[Mutiny - an intuitive reactive programming library].
 ====
 
 Let's write a REST endpoint that reads the next 3 items from a link:kafka[Kafka topic], stores them in a database using
@@ -77,7 +88,7 @@ them to the client, you can do it like this:
     public Publisher<Double> prices() {
         // get the next three prices from the price stream
         return Multi.createFrom().publisher(prices)
-                .transform().byTakingFirstItems(3)
+                .select().first(3)
                 .map(price -> {
                     // store each price before we send them
                     Price priceEntity = new Price();

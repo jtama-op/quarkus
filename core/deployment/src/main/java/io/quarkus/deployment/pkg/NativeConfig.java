@@ -39,6 +39,12 @@ public class NativeConfig {
     public boolean enableAllSecurityServices;
 
     /**
+     * If {@code -H:+InlineBeforeAnalysis} flag will be added to the native-image run
+     */
+    @ConfigItem
+    public boolean inlineBeforeAnalysis;
+
+    /**
      * @deprecated JNI is always enabled starting from GraalVM 19.3.1.
      */
     @Deprecated
@@ -113,8 +119,12 @@ public class NativeConfig {
     public boolean publishDebugBuildProcessPort;
 
     /**
-     * If the native image server should be restarted
+     * If the native image server should be restarted.
+     *
+     * @deprecated Since GraalVM 20.2.0 the native image server has become an experimental feature and is disabled by
+     *             default.
      */
+    @Deprecated
     @ConfigItem
     public boolean cleanupServer;
 
@@ -134,7 +144,12 @@ public class NativeConfig {
     /**
      * If the native image server should be used. This can speed up compilation but can result in changes not always
      * being picked up due to cache invalidation not working 100%
+     *
+     * @deprecated This used to be the default prior to GraalVM 20.2.0 and this configuration item was used to disable
+     *             it as it was not stable. Since GraalVM 20.2.0 the native image server has become an experimental
+     *             feature.
      */
+    @Deprecated
     @ConfigItem
     public boolean enableServer;
 
@@ -151,11 +166,17 @@ public class NativeConfig {
     public boolean dumpProxies;
 
     /**
-     * If this build should be done using a container runtime. If this is set docker will be used by default,
-     * unless container-runtime is also set.
+     * If this build should be done using a container runtime. Unless container-runtime is also set, docker will be
+     * used by default. If docker is not available or is an alias to podman, podman will be used instead as the default.
      */
     @ConfigItem
     public boolean containerBuild;
+
+    /**
+     * If this build is done using a remote docker daemon.
+     */
+    @ConfigItem
+    public boolean remoteContainerBuild;
 
     /**
      * The docker image to use to do the image build
@@ -207,6 +228,17 @@ public class NativeConfig {
      */
     @ConfigItem
     public boolean reportErrorsAtRuntime;
+
+    /**
+     * Don't build a native image if it already exists.
+     *
+     * This is useful if you have already built an image and you want to use Quarkus to deploy it somewhere.
+     *
+     * Note that this is not able to detect if the existing image is outdated, if you have modified source
+     * or config and want a new image you must not use this flag.
+     */
+    @ConfigItem(defaultValue = "false")
+    public boolean reuseExisting;
 
     /**
      * Build time configuration options for resources inclusion in the native executable.
@@ -335,6 +367,12 @@ public class NativeConfig {
         @ConfigItem
         public boolean enabled;
     }
+
+    /**
+     * Generate the report files for GraalVM Dashboard.
+     */
+    @ConfigItem
+    public boolean enableDashboardDump;
 
     /**
      * Supported Container runtimes

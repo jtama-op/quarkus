@@ -1,11 +1,26 @@
 ////
 This guide is maintained in the main Quarkus repository
 and pull requests should be submitted there:
-https://github.com/quarkusio/quarkus/tree/master/docs/src/main/asciidoc
+https://github.com/quarkusio/quarkus/tree/main/docs/src/main/asciidoc
 ////
 = Quarkus - Security Tips and Tricks
 
 include::./attributes.adoc[]
+
+== Quarkus Security Dependency
+
+`io.quarkus:quarkus-security` module contains the core Quarkus security classes.
+
+In most cases it does not have to be added directly to your project's `pom.xml` as it is already provided by all of the security extensions.
+However if you need to write your own custom security code (for example, register a <<jaxrs-security-context, Custom JAX-RS SecurityContext>>) or use <<bouncy-castle, BouncyCastle>> libraries, then please make sure it is included:
+
+[source,xml]
+----
+<dependency>
+  <groupId>io.quarkus</groupId>
+  <artifactId>quarkus-security</artifactId>
+</dependency>
+----
 
 == HttpAuthenticationMechanism Customization
 
@@ -141,11 +156,12 @@ public class RolesAugmentor implements SecurityIdentityAugmentor {
 ----
 
 [NOTE]
-===
+====
 If more than one custom `SecurityIdentityAugmentor` is registered then they will be considered equal candidates and invoked in random order.
 You can enforce the order by implementing a default `SecurityIdentityAugmentor#priority` method. Augmentors with higher priorities will be invoked first.
-===
+====
 
+[[jaxrs-security-context]]
 == Custom JAX-RS SecurityContext
 
 If you use JAX-RS `ContainerRequestFilter` to set a custom JAX-RS `SecurityContext` then make sure `ContainerRequestFilter` runs in the JAX-RS pre-match phase by adding a `@PreMatching` annotation to it for this custom security context to be linked with Quarkus `SecurityIdentity`, for example:
@@ -220,6 +236,8 @@ public class DisabledAuthController extends AuthorizationController {
 }
 ----
 
+Please also see link:security-testing#testing-security[TestingSecurity Annotation] section on how to disable the security checks using `TestSecurity` annotation.
+
 == Registering Security Providers
 
 === Default providers
@@ -235,6 +253,7 @@ configuration to register the "SunRsaSign" and "SunJCE" security providers:
 quarkus.security.security-providers=SunRsaSign,SunJCE
 ----
 
+[[bouncy-castle]]
 === BouncyCastle
 
 If you need to register an `org.bouncycastle.jce.provider.BouncyCastleProvider` JCE provider then please set a `BC` provider name:
@@ -302,6 +321,18 @@ and add the BouncyCastle FIPS provider dependency:
 </dependency>
 ----
 
+[NOTE]
+====
+`BCFIPS` provider option is supported in native image but the algorithm self-tests which rely on `java.security.SecureRandom` to verify the generated keys have been removed for these tests to pass. The following classes have been affected:
+- `org.bouncycastle.crypto.general.DSA`
+- `org.bouncycastle.crypto.general.DSTU4145`
+- `org.bouncycastle.crypto.general.ECGOST3410`
+- `org.bouncycastle.crypto.general.GOST3410`
+- `org.bouncycastle.crypto.fips.FipsDSA`
+- `org.bouncycastle.crypto.fips.FipsEC`
+- `org.bouncycastle.crypto.fips.FipsRSA`
+====
+
 === BouncyCastle JSSE FIPS
 
 If you need to register an `org.bouncycastle.jsse.provider.BouncyCastleJsseProvider` JSSE provider and use it in combination with `org.bouncycastle.jcajce.provider.BouncyCastleFipsProvider` instead of the default SunJSSE provider then please set a `BCFIPSJSSE` provider name:
@@ -345,6 +376,11 @@ One can generate a keystore with this type and provider like this:
 ----
 keytool -genkey -alias server -keyalg RSA -keystore server-keystore.jks -keysize 2048 -keypass password -provider org.bouncycastle.jcajce.provider.BouncyCastleFipsProvider -providerpath $PATH_TO_BC_FIPS_JAR -storetype BCFKS
 ----
+
+[NOTE]
+====
+`BCFIPSJSSE` provider option is currently not supported in native image.
+====
 
 == Reactive Security
 

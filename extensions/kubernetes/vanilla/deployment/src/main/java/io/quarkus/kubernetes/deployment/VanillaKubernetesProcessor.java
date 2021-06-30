@@ -9,7 +9,9 @@ import static io.quarkus.kubernetes.spi.KubernetesDeploymentTargetBuildItem.VANI
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import io.dekorate.kubernetes.annotation.ServiceType;
@@ -80,8 +82,10 @@ public class VanillaKubernetesProcessor {
     @BuildStep
     public List<ConfiguratorBuildItem> createConfigurators(KubernetesConfig config, List<KubernetesPortBuildItem> ports) {
         List<ConfiguratorBuildItem> result = new ArrayList<>();
-        result.addAll(KubernetesCommonHelper.createPlatformConfigurators(config));
-        result.addAll(KubernetesCommonHelper.createGlobalConfigurators(ports));
+        KubernetesCommonHelper.combinePorts(ports, config).entrySet().forEach(e -> {
+            result.add(new ConfiguratorBuildItem(new AddPortToKubernetesConfig(e.getValue())));
+        });
+        result.add(new ConfiguratorBuildItem(new ApplyExpositionConfigurator((config.ingress))));
         return result;
 
     }
@@ -103,7 +107,6 @@ public class VanillaKubernetesProcessor {
         result.addAll(KubernetesCommonHelper.createDecorators(project, KUBERNETES, name, config,
                 metricsConfiguration,
                 annotations, labels, command, ports, livenessPath, readinessPath, roles, roleBindings));
-
         if (config.getReplicas() != 1) {
             result.add(new DecoratorBuildItem(KUBERNETES, new ApplyReplicasDecorator(name, config.getReplicas())));
         }
@@ -114,6 +117,7 @@ public class VanillaKubernetesProcessor {
 
         result
                 .add(new DecoratorBuildItem(KUBERNETES, new ApplyImagePullPolicyDecorator(name, config.getImagePullPolicy())));
+        result.add(new DecoratorBuildItem(KUBERNETES, new AddSelectorToDeploymentDecorator(name)));
 
         Stream.concat(config.convertToBuildItems().stream(),
                 envs.stream().filter(e -> e.getTarget() == null || KUBERNETES.equals(e.getTarget()))).forEach(e -> {
@@ -132,14 +136,24 @@ public class VanillaKubernetesProcessor {
 
         // Service handling
         result.add(new DecoratorBuildItem(KUBERNETES, new ApplyServiceTypeDecorator(name, config.getServiceType().name())));
-        if ((config.getServiceType() == ServiceType.NodePort) && config.nodePort.isPresent()) {
-            result.add(new DecoratorBuildItem(KUBERNETES, new AddNodePortDecorator(name, config.nodePort.getAsInt())));
+        if ((config.getServiceType() == ServiceType.NodePort)) {
+            List<Map.Entry<String, PortConfig>> nodeConfigPorts = config.ports.entrySet().stream()
+                    .filter(e -> e.getValue().nodePort.isPresent())
+                    .collect(Collectors.toList());
+            if (!nodeConfigPorts.isEmpty()) {
+                for (Map.Entry<String, PortConfig> entry : nodeConfigPorts) {
+                    result.add(new DecoratorBuildItem(KUBERNETES,
+                            new AddNodePortDecorator(name, entry.getValue().nodePort.getAsInt(), Optional.of(entry.getKey()))));
+                }
+            } else if (config.nodePort.isPresent()) {
+                result.add(new DecoratorBuildItem(KUBERNETES, new AddNodePortDecorator(name, config.nodePort.getAsInt())));
+            }
         }
 
         // Probe port handling
         Integer port = ports.stream().filter(p -> HTTP_PORT.equals(p.getName())).map(KubernetesPortBuildItem::getPort)
                 .findFirst().orElse(DEFAULT_HTTP_PORT);
-        result.add(new DecoratorBuildItem(KUBERNETES, new ApplyHttpGetActionPortDecorator(port)));
+        result.add(new DecoratorBuildItem(KUBERNETES, new ApplyHttpGetActionPortDecorator(name, name, port)));
 
         return result;
     }

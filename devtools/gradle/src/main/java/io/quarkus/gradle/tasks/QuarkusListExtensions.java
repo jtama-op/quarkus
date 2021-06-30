@@ -1,10 +1,5 @@
 package io.quarkus.gradle.tasks;
 
-import static java.util.stream.Collectors.toList;
-
-import java.net.URL;
-import java.util.List;
-
 import org.gradle.api.GradleException;
 import org.gradle.api.tasks.Input;
 import org.gradle.api.tasks.Optional;
@@ -13,19 +8,19 @@ import org.gradle.api.tasks.options.Option;
 
 import io.quarkus.devtools.commands.ListExtensions;
 import io.quarkus.devtools.project.QuarkusProject;
-import io.quarkus.registry.DefaultExtensionRegistry;
 
 public class QuarkusListExtensions extends QuarkusPlatformTask {
+
+    private static final String DEFAULT_FORMAT = "concise";
 
     private boolean all = true;
     private boolean installed = false;
     private boolean fromCli = false;
 
-    private String format = "concise";
+    private String format = DEFAULT_FORMAT;
 
     private String searchPattern;
-
-    private List<String> registries;
+    private String category;
 
     @Input
     public boolean isAll() {
@@ -42,7 +37,7 @@ public class QuarkusListExtensions extends QuarkusPlatformTask {
         return fromCli;
     }
 
-    @Option(description = "List only installed extensions.", option = "fromCli")
+    @Option(description = "Indicates that a task is run from the Quarkus CLI.", option = "fromCli")
     public void setFromCli(boolean fromCli) {
         this.fromCli = fromCli;
     }
@@ -63,7 +58,7 @@ public class QuarkusListExtensions extends QuarkusPlatformTask {
         return format;
     }
 
-    @Option(description = "Select the output format among 'name' (display the name only), 'concise' (display name and description) and 'full' (concise format and version related columns).", option = "format")
+    @Option(description = "Select the output format among 'id' (display the artifactId only), 'concise' (display name and artifactId) and 'full' (concise format and version related columns).", option = "format")
     public void setFormat(String format) {
         this.format = format;
     }
@@ -81,13 +76,13 @@ public class QuarkusListExtensions extends QuarkusPlatformTask {
 
     @Optional
     @Input
-    public List<String> getRegistries() {
-        return registries;
+    public String getCategory() {
+        return category;
     }
 
-    @Option(description = "The extension registry URLs to be used", option = "registry")
-    public void setRegistries(List<String> registry) {
-        this.registries = registry;
+    @Option(description = "Only list extensions from given category.", option = "category")
+    public void setCategory(String category) {
+        this.category = category;
     }
 
     public QuarkusListExtensions() {
@@ -97,23 +92,32 @@ public class QuarkusListExtensions extends QuarkusPlatformTask {
     @TaskAction
     public void listExtensions() {
         try {
-            final QuarkusProject quarkusProject = getQuarkusProject();
-            getLogger().info("Quarkus platform " + quarkusProject.getPlatformDescriptor().getBomGroupId() + ":"
-                    + quarkusProject.getPlatformDescriptor().getBomArtifactId() + ":"
-                    + quarkusProject.getPlatformDescriptor().getBomVersion());
+            final QuarkusProject quarkusProject = getQuarkusProject(installed);
             ListExtensions listExtensions = new ListExtensions(quarkusProject)
                     .all(isFromCli() ? false : isAll())
                     .fromCli(isFromCli())
                     .format(getFormat())
                     .installed(isInstalled())
-                    .search(getSearchPattern());
-            if (registries != null && !registries.isEmpty()) {
-                List<URL> urls = registries.stream()
-                        .map(QuarkusListExtensions::toURL)
-                        .collect(toList());
-                listExtensions.extensionRegistry(DefaultExtensionRegistry.fromURLs(urls));
-            }
+                    .search(getSearchPattern())
+                    .category(getCategory());
             listExtensions.execute();
+
+            if (!fromCli) {
+                GradleMessageWriter log = messageWriter();
+                if (DEFAULT_FORMAT.equalsIgnoreCase(format)) {
+                    log.info("");
+                    log.info(ListExtensions.MORE_INFO_HINT, "--format=full");
+                }
+
+                if (!installed && (category == null || category.isBlank())) {
+                    log.info("");
+                    log.info(ListExtensions.FILTER_HINT, "--category=\"categoryId\"");
+                }
+
+                log.info("");
+                log.info(ListExtensions.ADD_EXTENSION_HINT,
+                        "build.gradle", "./gradlew addExtension --extensions=\"artifactId\"");
+            }
         } catch (Exception e) {
             throw new GradleException("Unable to list extensions", e);
         }

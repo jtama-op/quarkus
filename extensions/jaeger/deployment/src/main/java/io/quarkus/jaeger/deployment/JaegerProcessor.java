@@ -3,18 +3,15 @@ package io.quarkus.jaeger.deployment;
 import java.util.Optional;
 
 import io.jaegertracing.internal.JaegerTracer;
-import io.quarkus.deployment.Capability;
 import io.quarkus.deployment.Feature;
-import io.quarkus.deployment.annotations.BuildProducer;
 import io.quarkus.deployment.annotations.BuildStep;
 import io.quarkus.deployment.annotations.ExecutionTime;
 import io.quarkus.deployment.annotations.Record;
-import io.quarkus.deployment.builditem.CapabilityBuildItem;
 import io.quarkus.deployment.builditem.ExtensionSslNativeSupportBuildItem;
 import io.quarkus.deployment.builditem.FeatureBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.ReflectiveClassBuildItem;
 import io.quarkus.deployment.metrics.MetricsCapabilityBuildItem;
-import io.quarkus.deployment.pkg.steps.NativeBuild;
+import io.quarkus.deployment.pkg.steps.NativeOrNativeSourcesBuild;
 import io.quarkus.jaeger.runtime.JaegerBuildTimeConfig;
 import io.quarkus.jaeger.runtime.JaegerConfig;
 import io.quarkus.jaeger.runtime.JaegerDeploymentRecorder;
@@ -23,7 +20,7 @@ import io.quarkus.runtime.metrics.MetricsFactory;
 
 public class JaegerProcessor {
 
-    @BuildStep(onlyIf = NativeBuild.class)
+    @BuildStep(onlyIf = NativeOrNativeSourcesBuild.class)
     @Record(ExecutionTime.STATIC_INIT)
     void setVersion(JaegerDeploymentRecorder jdr) {
         jdr.setJaegerVersion(JaegerTracer.getVersionFromProperties());
@@ -54,14 +51,6 @@ public class JaegerProcessor {
     @BuildStep
     public FeatureBuildItem build() {
         return new FeatureBuildItem(Feature.JAEGER);
-    }
-
-    @BuildStep
-    public void capability(JaegerBuildTimeConfig buildTimeConfig,
-            BuildProducer<CapabilityBuildItem> capability) {
-        if (buildTimeConfig.enabled) {
-            capability.produce(new CapabilityBuildItem(Capability.OPENTRACING));
-        }
     }
 
     @BuildStep

@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.jar.Attributes;
 import java.util.jar.Manifest;
 import java.util.zip.ZipEntry;
@@ -198,7 +199,18 @@ public abstract class QuarkusDevModeLauncher {
 
         @SuppressWarnings("unchecked")
         public B remoteDev(boolean remoteDev) {
-            QuarkusDevModeLauncher.this.remoteDev = remoteDev;
+            QuarkusDevModeLauncher.this.entryPointCustomizer = new Consumer<DevModeContext>() {
+                @Override
+                public void accept(DevModeContext devModeContext) {
+                    devModeContext.setMode(QuarkusBootstrap.Mode.REMOTE_DEV_CLIENT);
+                    devModeContext.setAlternateEntryPoint(IsolatedRemoteDevModeMain.class.getName());
+                }
+            };
+            return (B) this;
+        }
+
+        public B entryPointCustomizer(Consumer<DevModeContext> consumer) {
+            QuarkusDevModeLauncher.this.entryPointCustomizer = consumer;
             return (B) this;
         }
 
@@ -216,6 +228,13 @@ public abstract class QuarkusDevModeLauncher {
         public B mainModule(ModuleInfo mainModule) {
             main = mainModule;
             return (B) this;
+        }
+
+        public boolean isTestsPresent() {
+            if (main == null) {
+                return false;
+            }
+            return main.getTest().isPresent();
         }
 
         @SuppressWarnings("unchecked")
@@ -264,7 +283,7 @@ public abstract class QuarkusDevModeLauncher {
     private Set<Path> buildFiles = new HashSet<>(0);
     private boolean deleteDevJar = true;
     private String baseName;
-    private boolean remoteDev;
+    private Consumer<DevModeContext> entryPointCustomizer;
     private String applicationArgs;
     private Set<AppArtifactKey> localArtifacts = new HashSet<>();
     private ModuleInfo main;
@@ -279,8 +298,11 @@ public abstract class QuarkusDevModeLauncher {
      */
     protected void prepare() throws Exception {
 
-        // the following flags reduce startup time and are acceptable only for dev purposes
-        args.add("-XX:TieredStopAtLevel=1");
+        if (!JavaVersionUtil.isGraalvmJdk()) {
+            // prevent C2 compiler for kicking in - makes startup a little faster
+            // it only makes sense in dev-mode but it is not available when GraalVM is used as the JDK
+            args.add("-XX:TieredStopAtLevel=1");
+        }
 
         if (suspend != null) {
             switch (suspend.toLowerCase(Locale.ENGLISH)) {
@@ -388,9 +410,8 @@ public abstract class QuarkusDevModeLauncher {
         // this is the jar file we will use to launch the dev mode main class
         devModeContext.setDevModeRunnerJarFile(tempFile);
 
-        if (remoteDev) {
-            devModeContext.setMode(QuarkusBootstrap.Mode.REMOTE_DEV_CLIENT);
-            devModeContext.setAlternateEntryPoint(IsolatedRemoteDevModeMain.class.getName());
+        if (entryPointCustomizer != null) {
+            entryPointCustomizer.accept(devModeContext);
         }
 
         try (ZipOutputStream out = new ZipOutputStream(new FileOutputStream(tempFile))) {

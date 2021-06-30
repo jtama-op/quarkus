@@ -23,19 +23,22 @@ public class WebTargetImpl implements WebTarget {
     private final ConfigurationImpl configuration;
     private boolean chunked = false;
     private final ClientImpl restClient;
-    final ClientRestHandler[] handlerChain;
-    final ClientRestHandler[] abortHandlerChain;
+    final HandlerChain handlerChain;
     final ThreadSetupAction requestContext;
+
+    // an additional handler that is passed to the handlerChain
+    // used to support observability features
+    private ClientRestHandler preClientSendHandler = null;
 
     public WebTargetImpl(ClientImpl restClient, HttpClient client, UriBuilder uriBuilder,
             ConfigurationImpl configuration,
-            ClientRestHandler[] handlerChain, ClientRestHandler[] abortHandlerChain, ThreadSetupAction requestContext) {
+            HandlerChain handlerChain,
+            ThreadSetupAction requestContext) {
         this.restClient = restClient;
         this.client = client;
         this.uriBuilder = uriBuilder;
         this.configuration = configuration;
         this.handlerChain = handlerChain;
-        this.abortHandlerChain = abortHandlerChain;
         this.requestContext = requestContext;
     }
 
@@ -262,8 +265,11 @@ public class WebTargetImpl implements WebTarget {
 
     protected WebTargetImpl newInstance(HttpClient client, UriBuilder uriBuilder,
             ConfigurationImpl configuration) {
-        return new WebTargetImpl(restClient, client, uriBuilder, configuration, handlerChain, abortHandlerChain,
+        WebTargetImpl result = new WebTargetImpl(restClient, client, uriBuilder, configuration,
+                handlerChain.setPreClientSendHandler(preClientSendHandler),
                 requestContext);
+        result.setPreClientSendHandler(preClientSendHandler);
+        return result;
     }
 
     @Override
@@ -298,8 +304,8 @@ public class WebTargetImpl implements WebTarget {
 
     protected InvocationBuilderImpl createQuarkusRestInvocationBuilder(HttpClient client, UriBuilder uri,
             ConfigurationImpl configuration) {
-        return new InvocationBuilderImpl(uri.build(), restClient, client, this, configuration, handlerChain,
-                abortHandlerChain, requestContext);
+        return new InvocationBuilderImpl(uri.build(), restClient, client, this, configuration,
+                handlerChain.setPreClientSendHandler(preClientSendHandler), requestContext);
     }
 
     @Override
@@ -376,8 +382,13 @@ public class WebTargetImpl implements WebTarget {
         return restClient.getClientContext().getClientProxies().get(clazz, this);
     }
 
-    ClientImpl getRestClient() {
+    public ClientImpl getRestClient() {
         return restClient;
+    }
+
+    @SuppressWarnings("unused")
+    public void setPreClientSendHandler(ClientRestHandler preClientSendHandler) {
+        this.preClientSendHandler = preClientSendHandler;
     }
 
     Serialisers getSerialisers() {

@@ -18,6 +18,12 @@ public class GrpcServerConfiguration {
     public int port;
 
     /**
+     * The gRPC Server port used for tests.
+     */
+    @ConfigItem(defaultValue = "9001")
+    public int testPort;
+
+    /**
      * The gRPC server host.
      */
     @ConfigItem(defaultValue = "0.0.0.0")
@@ -79,4 +85,16 @@ public class GrpcServerConfiguration {
      */
     @ConfigItem(defaultValue = "1")
     public int instances;
+
+    /**
+     * Configures the netty server settings.
+     */
+    @ConfigItem
+    public GrpcServerNettyConfig netty;
+
+    /**
+     * gRPC compression, e.g. "gzip"
+     */
+    @ConfigItem
+    public Optional<String> compression;
 }

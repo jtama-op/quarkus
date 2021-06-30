@@ -15,9 +15,12 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import javax.enterprise.context.Dependent;
+import javax.enterprise.context.ApplicationScoped;
 import javax.enterprise.inject.Default;
 
+import org.jboss.jandex.AnnotationInstance;
+import org.jboss.jandex.AnnotationTarget;
+import org.jboss.jandex.DotName;
 import org.jboss.logging.Logger;
 
 import io.quarkus.agroal.spi.JdbcDataSourceBuildItem;
@@ -27,22 +30,23 @@ import io.quarkus.arc.deployment.SyntheticBeanBuildItem;
 import io.quarkus.arc.deployment.SyntheticBeansRuntimeInitBuildItem;
 import io.quarkus.arc.processor.DotNames;
 import io.quarkus.datasource.common.runtime.DataSourceUtil;
-import io.quarkus.deployment.Capability;
 import io.quarkus.deployment.Feature;
 import io.quarkus.deployment.annotations.BuildProducer;
 import io.quarkus.deployment.annotations.BuildStep;
 import io.quarkus.deployment.annotations.Consume;
 import io.quarkus.deployment.annotations.ExecutionTime;
 import io.quarkus.deployment.annotations.Record;
-import io.quarkus.deployment.builditem.CapabilityBuildItem;
+import io.quarkus.deployment.builditem.CombinedIndexBuildItem;
 import io.quarkus.deployment.builditem.FeatureBuildItem;
+import io.quarkus.deployment.builditem.IndexDependencyBuildItem;
 import io.quarkus.deployment.builditem.ServiceStartBuildItem;
+import io.quarkus.deployment.builditem.SystemPropertyBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.NativeImageResourceBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.NativeImageResourceBundleBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.ReflectiveClassBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.RuntimeInitializedClassBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.ServiceProviderBuildItem;
-import io.quarkus.deployment.pkg.steps.NativeBuild;
+import io.quarkus.deployment.pkg.steps.NativeOrNativeSourcesBuild;
 import io.quarkus.deployment.util.ServiceUtil;
 import io.quarkus.liquibase.LiquibaseDataSource;
 import io.quarkus.liquibase.LiquibaseFactory;
@@ -50,6 +54,7 @@ import io.quarkus.liquibase.runtime.LiquibaseBuildTimeConfig;
 import io.quarkus.liquibase.runtime.LiquibaseFactoryProducer;
 import io.quarkus.liquibase.runtime.LiquibaseRecorder;
 import liquibase.change.Change;
+import liquibase.change.DatabaseChangeProperty;
 import liquibase.change.core.CreateProcedureChange;
 import liquibase.change.core.CreateViewChange;
 import liquibase.change.core.LoadDataChange;
@@ -68,17 +73,33 @@ class LiquibaseProcessor {
 
     private static final String LIQUIBASE_BEAN_NAME_PREFIX = "liquibase_";
 
+    private static final DotName DATABASE_CHANGE_PROPERTY = DotName.createSimple(DatabaseChangeProperty.class.getName());
+
     @BuildStep
-    CapabilityBuildItem capability() {
-        return new CapabilityBuildItem(Capability.LIQUIBASE);
+    FeatureBuildItem feature() {
+        return new FeatureBuildItem(Feature.LIQUIBASE);
     }
 
-    @BuildStep(onlyIf = NativeBuild.class)
+    @BuildStep
+    public SystemPropertyBuildItem disableHub() {
+        // Don't block app startup with prompt:
+        // Do you want to see this operation's report in Liquibase Hub, which improves team collaboration?
+        // If so, enter your email. If not, enter [N] to no longer be prompted, or [S] to skip for now, but ask again next time (default "S"):
+        return new SystemPropertyBuildItem("liquibase.hub.mode", "off");
+    }
+
+    @BuildStep(onlyIf = NativeOrNativeSourcesBuild.class)
+    IndexDependencyBuildItem indexLiquibase() {
+        return new IndexDependencyBuildItem("org.liquibase", "liquibase-core");
+    }
+
+    @BuildStep(onlyIf = NativeOrNativeSourcesBuild.class)
     @Record(STATIC_INIT)
     void nativeImageConfiguration(
             LiquibaseRecorder recorder,
             LiquibaseBuildTimeConfig liquibaseBuildConfig,
             List<JdbcDataSourceBuildItem> jdbcDataSourceBuildItems,
+            CombinedIndexBuildItem combinedIndex,
             BuildProducer<ReflectiveClassBuildItem> reflective,
             BuildProducer<NativeImageResourceBuildItem> resource,
             BuildProducer<ServiceProviderBuildItem> services,
@@ -112,6 +133,19 @@ class LiquibaseProcessor {
 
         reflective.produce(new ReflectiveClassBuildItem(false, false, true,
                 liquibase.change.ConstraintsConfig.class.getName()));
+
+        // register classes marked with @DatabaseChangeProperty for reflection
+        Set<String> classesMarkedWithDatabaseChangeProperty = new HashSet<>();
+        for (AnnotationInstance databaseChangePropertyInstance : combinedIndex.getIndex()
+                .getAnnotations(DATABASE_CHANGE_PROPERTY)) {
+            // the annotation is only supported on methods but let's be safe
+            AnnotationTarget annotationTarget = databaseChangePropertyInstance.target();
+            if (annotationTarget.kind() == AnnotationTarget.Kind.METHOD) {
+                classesMarkedWithDatabaseChangeProperty.add(annotationTarget.asMethod().declaringClass().name().toString());
+            }
+        }
+        reflective.produce(
+                new ReflectiveClassBuildItem(true, true, true, classesMarkedWithDatabaseChangeProperty.toArray(new String[0])));
 
         Collection<String> dataSourceNames = jdbcDataSourceBuildItems.stream()
                 .map(i -> i.getName())
@@ -188,11 +222,6 @@ class LiquibaseProcessor {
     }
 
     @BuildStep
-    FeatureBuildItem feature() {
-        return new FeatureBuildItem(Feature.LIQUIBASE);
-    }
-
-    @BuildStep
     @Record(ExecutionTime.RUNTIME_INIT)
     void createBeans(LiquibaseRecorder recorder,
             List<JdbcDataSourceBuildItem> jdbcDataSourceBuildItems,
@@ -211,7 +240,7 @@ class LiquibaseProcessor {
         for (String dataSourceName : dataSourceNames) {
             SyntheticBeanBuildItem.ExtendedBeanConfigurator configurator = SyntheticBeanBuildItem
                     .configure(LiquibaseFactory.class)
-                    .scope(Dependent.class) // this is what the existing code does, but it doesn't seem reasonable
+                    .scope(ApplicationScoped.class) // this is what the existing code does, but it doesn't seem reasonable
                     .setRuntimeInit()
                     .unremovable()
                     .supplier(recorder.liquibaseSupplier(dataSourceName));

@@ -27,11 +27,9 @@ import io.quarkus.deployment.util.WebJarUtil;
 import io.quarkus.smallrye.openapi.common.deployment.SmallRyeOpenApiConfig;
 import io.quarkus.swaggerui.runtime.SwaggerUiRecorder;
 import io.quarkus.swaggerui.runtime.SwaggerUiRuntimeConfig;
-import io.quarkus.vertx.http.deployment.HttpRootPathBuildItem;
 import io.quarkus.vertx.http.deployment.NonApplicationRootPathBuildItem;
 import io.quarkus.vertx.http.deployment.RouteBuildItem;
-import io.quarkus.vertx.http.deployment.devmode.NotFoundPageDisplayableEndpointBuildItem;
-import io.smallrye.openapi.ui.IndexCreator;
+import io.smallrye.openapi.ui.IndexHtmlCreator;
 import io.smallrye.openapi.ui.Option;
 import io.smallrye.openapi.ui.ThemeHref;
 import io.vertx.core.Handler;
@@ -79,12 +77,10 @@ public class SwaggerUiProcessor {
             BuildProducer<NativeImageResourceBuildItem> nativeImageResourceBuildItemBuildProducer,
             BuildProducer<SwaggerUiBuildItem> swaggerUiBuildProducer,
             NonApplicationRootPathBuildItem nonApplicationRootPathBuildItem,
-            BuildProducer<NotFoundPageDisplayableEndpointBuildItem> displayableEndpoints,
             CurateOutcomeBuildItem curateOutcomeBuildItem,
             LaunchModeBuildItem launchMode,
             SwaggerUiConfig swaggerUiConfig,
             SmallRyeOpenApiConfig openapi,
-            HttpRootPathBuildItem httpRootPathBuildItem,
             LiveReloadBuildItem liveReloadBuildItem) throws Exception {
 
         if (shouldInclude(launchMode, swaggerUiConfig)) {
@@ -93,23 +89,28 @@ public class SwaggerUiProcessor {
                         "quarkus.swagger-ui.path was set to \"/\", this is not allowed as it blocks the application from serving anything else.");
             }
 
-            String openApiPath = httpRootPathBuildItem.adjustPath(nonApplicationRootPathBuildItem.adjustPath(openapi.path));
-            String swaggerUiPath = httpRootPathBuildItem
-                    .adjustPath(nonApplicationRootPathBuildItem.adjustPath(swaggerUiConfig.path));
+            if (openapi.path.equalsIgnoreCase(swaggerUiConfig.path)) {
+                throw new ConfigurationError(
+                        "quarkus.smallrye-openapi.path and quarkus.swagger-ui.path was set to the same value, this is not allowed as the paths needs to be unique ["
+                                + openapi.path + "].");
+
+            }
+
+            String openApiPath = nonApplicationRootPathBuildItem.resolvePath(openapi.path);
+            String swaggerUiPath = nonApplicationRootPathBuildItem.resolvePath(swaggerUiConfig.path);
 
             AppArtifact artifact = WebJarUtil.getAppArtifact(curateOutcomeBuildItem, SWAGGER_UI_WEBJAR_GROUP_ID,
                     SWAGGER_UI_WEBJAR_ARTIFACT_ID);
 
             if (launchMode.getLaunchMode().isDevOrTest()) {
-                Path tempPath = WebJarUtil.copyResourcesForDevOrTest(curateOutcomeBuildItem, launchMode, artifact,
+                Path tempPath = WebJarUtil.copyResourcesForDevOrTest(liveReloadBuildItem, curateOutcomeBuildItem, launchMode,
+                        artifact,
                         SWAGGER_UI_WEBJAR_PREFIX);
                 // Update index.html
                 WebJarUtil.updateFile(tempPath.resolve("index.html"),
                         generateIndexHtml(openApiPath, swaggerUiPath, swaggerUiConfig));
 
                 swaggerUiBuildProducer.produce(new SwaggerUiBuildItem(tempPath.toAbsolutePath().toString(), swaggerUiPath));
-                displayableEndpoints.produce(new NotFoundPageDisplayableEndpointBuildItem(
-                        nonApplicationRootPathBuildItem.adjustPath(swaggerUiConfig.path + "/"), "Open API UI"));
 
                 // Handle live reload of branding files
                 if (liveReloadBuildItem.isLiveReload() && !liveReloadBuildItem.getChangedResources().isEmpty()) {
@@ -144,6 +145,7 @@ public class SwaggerUiProcessor {
     @Record(ExecutionTime.RUNTIME_INIT)
     public void registerSwaggerUiHandler(SwaggerUiRecorder recorder,
             BuildProducer<RouteBuildItem> routes,
+            NonApplicationRootPathBuildItem nonApplicationRootPathBuildItem,
             SwaggerUiBuildItem finalDestinationBuildItem,
             SwaggerUiRuntimeConfig runtimeConfig,
             LaunchModeBuildItem launchMode,
@@ -154,18 +156,17 @@ public class SwaggerUiProcessor {
                     finalDestinationBuildItem.getSwaggerUiPath(),
                     runtimeConfig);
 
-            routes.produce(
-                    new RouteBuildItem.Builder()
-                            .route(swaggerUiConfig.path)
-                            .handler(handler)
-                            .nonApplicationRoute()
-                            .build());
-            routes.produce(
-                    new RouteBuildItem.Builder()
-                            .route(swaggerUiConfig.path + "/*")
-                            .handler(handler)
-                            .nonApplicationRoute()
-                            .build());
+            routes.produce(nonApplicationRootPathBuildItem.routeBuilder()
+                    .route(swaggerUiConfig.path)
+                    .displayOnNotFoundPage("Open API UI")
+                    .routeConfigKey("quarkus.swagger-ui.path")
+                    .handler(handler)
+                    .build());
+
+            routes.produce(nonApplicationRootPathBuildItem.routeBuilder()
+                    .route(swaggerUiConfig.path + "*")
+                    .handler(handler)
+                    .build());
         }
     }
 
@@ -317,7 +318,66 @@ public class SwaggerUiProcessor {
             options.put(Option.presets, presets);
         }
 
-        return IndexCreator.createIndexHtml(urlsMap, swaggerUiConfig.urlsPrimaryName.orElse(null), options);
+        if (swaggerUiConfig.oauthClientId.isPresent()) {
+            String oauthClientId = swaggerUiConfig.oauthClientId.get();
+            options.put(Option.oauthClientId, oauthClientId);
+        }
+        if (swaggerUiConfig.oauthClientSecret.isPresent()) {
+            String oauthClientSecret = swaggerUiConfig.oauthClientSecret.get();
+            options.put(Option.oauthClientSecret, oauthClientSecret);
+        }
+        if (swaggerUiConfig.oauthRealm.isPresent()) {
+            String oauthRealm = swaggerUiConfig.oauthRealm.get();
+            options.put(Option.oauthRealm, oauthRealm);
+        }
+        if (swaggerUiConfig.oauthAppName.isPresent()) {
+            String oauthAppName = swaggerUiConfig.oauthAppName.get();
+            options.put(Option.oauthAppName, oauthAppName);
+        }
+        if (swaggerUiConfig.oauthScopeSeparator.isPresent()) {
+            String oauthScopeSeparator = swaggerUiConfig.oauthScopeSeparator.get();
+            options.put(Option.oauthScopeSeparator, oauthScopeSeparator);
+        }
+        if (swaggerUiConfig.oauthScopes.isPresent()) {
+            String oauthScopes = swaggerUiConfig.oauthScopes.get();
+            options.put(Option.oauthScopes, oauthScopes);
+        }
+        if (swaggerUiConfig.oauthAdditionalQueryStringParams.isPresent()) {
+            String oauthAdditionalQueryStringParams = swaggerUiConfig.oauthAdditionalQueryStringParams.get();
+            options.put(Option.oauthAdditionalQueryStringParams, oauthAdditionalQueryStringParams);
+        }
+        if (swaggerUiConfig.oauthUseBasicAuthenticationWithAccessCodeGrant.isPresent()) {
+            String oauthUseBasicAuthenticationWithAccessCodeGrant = swaggerUiConfig.oauthUseBasicAuthenticationWithAccessCodeGrant
+                    .get().toString();
+            options.put(Option.oauthUseBasicAuthenticationWithAccessCodeGrant, oauthUseBasicAuthenticationWithAccessCodeGrant);
+        }
+        if (swaggerUiConfig.oauthUsePkceWithAuthorizationCodeGrant.isPresent()) {
+            String oauthUsePkceWithAuthorizationCodeGrant = swaggerUiConfig.oauthUsePkceWithAuthorizationCodeGrant.get()
+                    .toString();
+            options.put(Option.oauthUsePkceWithAuthorizationCodeGrant, oauthUsePkceWithAuthorizationCodeGrant);
+        }
+        if (swaggerUiConfig.preauthorizeBasicAuthDefinitionKey.isPresent()) {
+            String preauthorizeBasicAuthDefinitionKey = swaggerUiConfig.preauthorizeBasicAuthDefinitionKey.get();
+            options.put(Option.preauthorizeBasicAuthDefinitionKey, preauthorizeBasicAuthDefinitionKey);
+        }
+        if (swaggerUiConfig.preauthorizeBasicUsername.isPresent()) {
+            String preauthorizeBasicUsername = swaggerUiConfig.preauthorizeBasicUsername.get();
+            options.put(Option.preauthorizeBasicUsername, preauthorizeBasicUsername);
+        }
+        if (swaggerUiConfig.preauthorizeBasicPassword.isPresent()) {
+            String preauthorizeBasicPassword = swaggerUiConfig.preauthorizeBasicPassword.get();
+            options.put(Option.preauthorizeBasicPassword, preauthorizeBasicPassword);
+        }
+        if (swaggerUiConfig.preauthorizeApiKeyAuthDefinitionKey.isPresent()) {
+            String preauthorizeApiKeyAuthDefinitionKey = swaggerUiConfig.preauthorizeApiKeyAuthDefinitionKey.get();
+            options.put(Option.preauthorizeApiKeyAuthDefinitionKey, preauthorizeApiKeyAuthDefinitionKey);
+        }
+        if (swaggerUiConfig.preauthorizeApiKeyApiKeyValue.isPresent()) {
+            String preauthorizeApiKeyApiKeyValue = swaggerUiConfig.preauthorizeApiKeyApiKeyValue.get();
+            options.put(Option.preauthorizeApiKeyApiKeyValue, preauthorizeApiKeyApiKeyValue);
+        }
+
+        return IndexHtmlCreator.createIndexHtml(urlsMap, swaggerUiConfig.urlsPrimaryName.orElse(null), options);
     }
 
     private static boolean shouldInclude(LaunchModeBuildItem launchMode, SwaggerUiConfig swaggerUiConfig) {

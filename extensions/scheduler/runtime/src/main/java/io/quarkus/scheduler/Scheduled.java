@@ -10,10 +10,14 @@ import java.lang.annotation.Target;
 import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 
+import javax.enterprise.context.Dependent;
+
 import io.quarkus.scheduler.Scheduled.Schedules;
 
 /**
  * Marks a business method to be automatically scheduled and invoked by the container.
+ * <p>
+ * The target business method must be non-private and non-static.
  * <p>
  * The schedule is defined either by {@link #cron()} or by {@link #every()} attribute. If both are specified, the cron
  * expression takes precedence.
@@ -32,7 +36,6 @@ import io.quarkus.scheduler.Scheduled.Schedules;
  * The annotated method must return {@code void} and either declare no parameters or one parameter of type
  * {@link ScheduledExecution}.
  *
- * @author Martin Kouba
  * @see ScheduledExecution
  */
 @Target(METHOD)
@@ -42,6 +45,10 @@ public @interface Scheduled {
 
     /**
      * Optionally defines a unique identifier for this job.
+     * <p>
+     * If the value starts with "&#123;" and ends with "&#125;" the scheduler attempts to find a corresponding config property
+     * and use the configured value instead: {@code &#64;Scheduled(identity = "{myservice.check.identity.expr}")}.
+     *
      * <p>
      * If the value is not given, Quarkus will generate a unique id.
      * <p>
@@ -113,6 +120,17 @@ public @interface Scheduled {
      */
     ConcurrentExecution concurrentExecution() default PROCEED;
 
+    /**
+     * Specify the bean class that can be used to skip any execution of a scheduled method.
+     * <p>
+     * There must be exactly one bean that has the specified class in its set of bean types, otherwise the build
+     * fails. Furthermore, the scope of the bean must be active during execution. If the scope is {@link Dependent} then the
+     * bean instance belongs exclusively to the specific scheduled method and is destroyed when the application is shut down.
+     * 
+     * @return the bean class
+     */
+    Class<? extends SkipPredicate> skipExecutionIf() default Never.class;
+
     @Retention(RUNTIME)
     @Target(METHOD)
     @interface Schedules {
@@ -136,6 +154,33 @@ public @interface Scheduled {
          * invocation completes.
          */
         SKIP,
+
+    }
+
+    /**
+     * 
+     * @see Scheduled#skipExecutionIf()
+     */
+    interface SkipPredicate {
+
+        /**
+         * 
+         * @param execution
+         * @return {@code true} if the given execution should be skipped, {@code false} otherwise
+         */
+        boolean test(ScheduledExecution execution);
+
+    }
+
+    /**
+     * Execution is never skipped.
+     */
+    class Never implements SkipPredicate {
+
+        @Override
+        public boolean test(ScheduledExecution execution) {
+            return false;
+        }
 
     }
 

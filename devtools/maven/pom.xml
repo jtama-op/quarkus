@@ -34,11 +34,11 @@
         </dependency>
         <dependency>
             <groupId>io.quarkus</groupId>
-            <artifactId>quarkus-platform-descriptor-json</artifactId>
+            <artifactId>quarkus-project-core-extension-codestarts</artifactId>
         </dependency>
         <dependency>
             <groupId>io.quarkus</groupId>
-            <artifactId>quarkus-platform-descriptor-resolver-json</artifactId>
+            <artifactId>quarkus-devtools-common</artifactId>
         </dependency>
         <dependency>
             <groupId>org.apache.maven</groupId>
@@ -116,12 +116,6 @@
             </exclusions>
         </dependency>
 
-        <!-- user prompt -->
-        <dependency>
-            <groupId>jline</groupId>
-            <artifactId>jline</artifactId>
-        </dependency>
-
         <dependency>
             <groupId>org.freemarker</groupId>
             <artifactId>freemarker</artifactId>
@@ -151,6 +145,12 @@
         </dependency>
 
         <!-- test -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-bootstrap-core</artifactId>
+            <type>test-jar</type>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>org.assertj</groupId>
             <artifactId>assertj-core</artifactId>
@@ -194,7 +194,7 @@
             <plugin>
                 <groupId>org.codehaus.plexus</groupId>
                 <artifactId>plexus-component-metadata</artifactId>
-                <version>1.7.1</version>
+                <version>2.1.0</version>
                 <configuration>
                     <staticMetadataDirectory>${basedir}/target/filtered-resources/META-INF/plexus</staticMetadataDirectory>
                 </configuration>

@@ -1,7 +1,7 @@
 package io.quarkus.devtools.project.buildfile;
 
-import io.quarkus.bootstrap.model.AppArtifactCoords;
 import io.quarkus.devtools.project.QuarkusProject;
+import io.quarkus.maven.ArtifactCoords;
 import java.io.IOException;
 
 public final class GroovyGradleBuildFilesCreator extends AbstractGradleBuildFilesCreator {
@@ -30,8 +30,8 @@ public final class GroovyGradleBuildFilesCreator extends AbstractGradleBuildFile
             res.append(System.lineSeparator()).append("    id 'io.quarkus'").append(System.lineSeparator());
             res.append("}");
         }
-        if (!containsBOM(getQuarkusProject().getPlatformDescriptor().getBomGroupId(),
-                getQuarkusProject().getPlatformDescriptor().getBomArtifactId())) {
+        final ArtifactCoords bom = getQuarkusProject().getExtensionsCatalog().getBom();
+        if (!containsBOM(bom.getGroupId(), bom.getArtifactId())) {
             res.append(System.lineSeparator());
             res.append("dependencies {").append(System.lineSeparator());
             res.append(
@@ -89,7 +89,7 @@ public final class GroovyGradleBuildFilesCreator extends AbstractGradleBuildFile
     }
 
     @Override
-    void addDependencyInBuildFile(AppArtifactCoords coords) throws IOException {
+    void addDependencyInBuildFile(ArtifactCoords coords) throws IOException {
         AbstractGroovyGradleBuildFile.addDependencyInModel(getModel(), coords, false);
     }
 

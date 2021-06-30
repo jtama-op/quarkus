@@ -90,10 +90,10 @@ public class KnativeProcessor {
     @BuildStep
     public List<ConfiguratorBuildItem> createConfigurators(KnativeConfig config, List<KubernetesPortBuildItem> ports) {
         List<ConfiguratorBuildItem> result = new ArrayList<>();
-        result.addAll(KubernetesCommonHelper.createPlatformConfigurators(config));
-        result.addAll(KubernetesCommonHelper.createGlobalConfigurators(ports));
+        KubernetesCommonHelper.combinePorts(ports, config).entrySet().forEach(e -> {
+            result.add(new ConfiguratorBuildItem(new AddPortToKnativeConfig(e.getValue())));
+        });
         return result;
-
     }
 
     @BuildStep
@@ -229,6 +229,10 @@ public class KnativeProcessor {
         config.getSidecars().entrySet().forEach(e -> {
             result.add(new DecoratorBuildItem(KNATIVE, new AddSidecarToRevisionDecorator(name, ContainerConverter.convert(e))));
         });
+
+        if (!roleBindings.isEmpty()) {
+            result.add(new DecoratorBuildItem(new ApplyServiceAccountNameToRevisionSpecDecorator()));
+        }
 
         return result;
     }

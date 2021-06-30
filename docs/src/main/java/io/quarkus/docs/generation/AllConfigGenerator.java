@@ -21,64 +21,58 @@ import org.eclipse.aether.artifact.DefaultArtifact;
 import org.eclipse.aether.resolution.ArtifactRequest;
 import org.eclipse.aether.resolution.ArtifactResult;
 
-import com.fasterxml.jackson.core.json.JsonReadFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.PropertyNamingStrategies;
-import com.fasterxml.jackson.databind.json.JsonMapper;
-
 import io.quarkus.annotation.processor.generate_doc.ConfigDocGeneratedOutput;
 import io.quarkus.annotation.processor.generate_doc.ConfigDocItem;
 import io.quarkus.annotation.processor.generate_doc.ConfigDocItemScanner;
 import io.quarkus.annotation.processor.generate_doc.ConfigDocSection;
 import io.quarkus.annotation.processor.generate_doc.ConfigDocWriter;
 import io.quarkus.annotation.processor.generate_doc.DocGeneratorUtil;
-import io.quarkus.bootstrap.resolver.maven.BootstrapMavenException;
 import io.quarkus.bootstrap.resolver.maven.MavenArtifactResolver;
-import io.quarkus.docs.generation.ExtensionJson.Extension;
+import io.quarkus.maven.ArtifactCoords;
+import io.quarkus.registry.catalog.Extension;
+import io.quarkus.registry.catalog.json.JsonCatalogMapperHelper;
+import io.quarkus.registry.catalog.json.JsonExtensionCatalog;
 
 public class AllConfigGenerator {
-    public static void main(String[] args) throws BootstrapMavenException, IOException {
-        if (args.length != 2) {
+
+    public static Artifact toAetherArtifact(ArtifactCoords coords) {
+        return new DefaultArtifact(coords.getGroupId(), coords.getArtifactId(), coords.getClassifier(), coords.getType(),
+                coords.getVersion());
+    }
+
+    public static void main(String[] args) throws Exception {
+        if (args.length != 1) {
             // exit 1 will break Maven
-            throw new IllegalArgumentException("Usage: <version> <extension.json>");
+            throw new IllegalArgumentException("Usage: <extension-catalog.json>");
         }
-        String version = args[0];
-        String extensionFile = args[1];
+        String jsonCatalog = args[0];
 
         // This is where we produce the entire list of extensions
-        File jsonFile = new File(extensionFile);
+        File jsonFile = new File(jsonCatalog);
         if (!jsonFile.exists()) {
-            System.err.println("WARNING: could not generate all-config file because extensions list is missing: " + jsonFile);
-            // exit 0 will break Maven
-            return;
+            throw new RuntimeException(
+                    "Could not generate all-config file because extension catalog file is missing: " + jsonFile);
         }
-        ObjectMapper mapper = JsonMapper.builder()
-                .enable(JsonReadFeature.ALLOW_JAVA_COMMENTS)
-                .enable(JsonReadFeature.ALLOW_LEADING_ZEROS_FOR_NUMBERS)
-                .propertyNamingStrategy(PropertyNamingStrategies.KEBAB_CASE)
-                .build();
         MavenArtifactResolver resolver = MavenArtifactResolver.builder().setWorkspaceDiscovery(false).build();
 
-        // let's read it (and ignore the fields we don't need)
-        ExtensionJson extensionJson = mapper.readValue(jsonFile, ExtensionJson.class);
+        final JsonExtensionCatalog extensionJson = JsonCatalogMapperHelper.deserialize(jsonFile.toPath(),
+                JsonExtensionCatalog.class);
 
         // now get all the listed extension jars via Maven
-        List<ArtifactRequest> requests = new ArrayList<>(extensionJson.extensions.size());
+        List<ArtifactRequest> requests = new ArrayList<>(extensionJson.getExtensions().size());
         Map<String, Extension> extensionsByGav = new HashMap<>();
         Map<String, Extension> extensionsByConfigRoots = new HashMap<>();
-        for (Extension extension : extensionJson.extensions) {
-            ArtifactRequest request = new ArtifactRequest();
-            Artifact artifact = new DefaultArtifact(extension.groupId, extension.artifactId, "jar", version);
-            request.setArtifact(artifact);
-            requests.add(request);
+        for (Extension extension : extensionJson.getExtensions()) {
+            final Artifact artifact = toAetherArtifact(extension.getArtifact());
+            requests.add(new ArtifactRequest().setArtifact(artifact));
             // record the extension for this GAV
-            extensionsByGav.put(extension.groupId + ":" + extension.artifactId, extension);
+            extensionsByGav.put(artifact.getGroupId() + ":" + artifact.getArtifactId(), extension);
         }
 
         // examine all the extension jars
-        List<ArtifactRequest> deploymentRequests = new ArrayList<>(extensionJson.extensions.size());
+        List<ArtifactRequest> deploymentRequests = new ArrayList<>(extensionJson.getExtensions().size());
         for (ArtifactResult result : resolver.resolve(requests)) {
-            Artifact artifact = result.getArtifact();
+            final Artifact artifact = result.getArtifact();
             // which extension was this for?
             Extension extension = extensionsByGav.get(artifact.getGroupId() + ":" + artifact.getArtifactId());
             try (ZipFile zf = new ZipFile(artifact.getFile())) {
@@ -92,13 +86,11 @@ public class AllConfigGenerator {
                             new InputStreamReader(zf.getInputStream(entry), StandardCharsets.UTF_8))) {
                         Properties properties = new Properties();
                         properties.load(reader);
-                        String deploymentGav = (String) properties.get("deployment-artifact");
+                        final String deploymentCoords = (String) properties.get("deployment-artifact");
                         // if it has one, load it
-                        if (deploymentGav != null) {
-                            ArtifactRequest request = new ArtifactRequest();
-                            Artifact deploymentArtifact = new DefaultArtifact(deploymentGav);
-                            request.setArtifact(deploymentArtifact);
-                            deploymentRequests.add(request);
+                        if (deploymentCoords != null) {
+                            final Artifact deploymentArtifact = toAetherArtifact(ArtifactCoords.fromString(deploymentCoords));
+                            deploymentRequests.add(new ArtifactRequest().setArtifact(deploymentArtifact));
                             // tie this artifact to its extension
                             extensionsByGav.put(deploymentArtifact.getGroupId() + ":" + deploymentArtifact.getArtifactId(),
                                     extension);
@@ -110,7 +102,7 @@ public class AllConfigGenerator {
 
         // now examine all the extension deployment jars
         for (ArtifactResult result : resolver.resolve(deploymentRequests)) {
-            Artifact artifact = result.getArtifact();
+            final Artifact artifact = result.getArtifact();
             // which extension was this for?
             Extension extension = extensionsByGav.get(artifact.getGroupId() + ":" + artifact.getArtifactId());
             try (ZipFile zf = new ZipFile(artifact.getFile())) {
@@ -120,15 +112,11 @@ public class AllConfigGenerator {
         }
 
         // load all the config items per config root
-        ConfigDocItemScanner configDocItemScanner = new ConfigDocItemScanner();
-        Map<String, List<ConfigDocItem>> docItemsByConfigRoots = configDocItemScanner
+        final ConfigDocItemScanner configDocItemScanner = new ConfigDocItemScanner();
+        final Map<String, List<ConfigDocItem>> docItemsByConfigRoots = configDocItemScanner
                 .loadAllExtensionsConfigurationItems();
-        Map<String, String> artifactIdsByName = new HashMap<>();
+        final Map<String, String> artifactIdsByName = new HashMap<>();
         ConfigDocWriter configDocWriter = new ConfigDocWriter();
-
-        // build a list of sorted config items by extension
-        List<ConfigDocItem> allItems = new ArrayList<>();
-        SortedMap<String, List<ConfigDocItem>> sortedConfigItemsByExtension = new TreeMap<>();
 
         // Temporary fix for https://github.com/quarkusio/quarkus/issues/5214 until we figure out how to fix it
         Extension openApi = extensionsByGav.get("io.quarkus:quarkus-smallrye-openapi");
@@ -136,21 +124,25 @@ public class AllConfigGenerator {
             extensionsByConfigRoots.put("io.quarkus.smallrye.openapi.common.deployment.SmallRyeOpenApiConfig", openApi);
         }
 
+        // build a list of sorted config items by extension
+        final SortedMap<String, List<ConfigDocItem>> sortedConfigItemsByExtension = new TreeMap<>();
+
         // sort extensions by name, assign their config items based on their config roots
         for (Entry<String, Extension> entry : extensionsByConfigRoots.entrySet()) {
             List<ConfigDocItem> items = docItemsByConfigRoots.get(entry.getKey());
             if (items != null) {
-                String extensionName = entry.getValue().name;
+                String extensionName = entry.getValue().getName();
                 if (extensionName == null) {
-                    String extensionGav = entry.getValue().groupId + ":" + entry.getValue().artifactId;
                     // compute the docs file name for this extension
                     String docFileName = DocGeneratorUtil.computeExtensionDocFileName(entry.getKey());
                     // now approximate an extension file name based on it
                     extensionName = guessExtensionNameFromDocumentationFileName(docFileName);
-                    System.err.println("WARNING: Extension name missing for " + extensionGav + " using guessed extension name: "
-                            + extensionName);
+                    System.err.println("WARNING: Extension name missing for "
+                            + (entry.getValue().getArtifact().getGroupId() + ":"
+                                    + entry.getValue().getArtifact().getArtifactId())
+                            + " using guessed extension name: " + extensionName);
                 }
-                artifactIdsByName.put(extensionName, entry.getValue().artifactId);
+                artifactIdsByName.put(extensionName, entry.getValue().getArtifact().getArtifactId());
                 List<ConfigDocItem> existingConfigDocItems = sortedConfigItemsByExtension.get(extensionName);
                 if (existingConfigDocItems != null) {
                     DocGeneratorUtil.appendConfigItemsIntoExistingOnes(existingConfigDocItems, items);
@@ -163,6 +155,7 @@ public class AllConfigGenerator {
         }
 
         // now we have all the config items sorted by extension, let's build the entire list
+        final List<ConfigDocItem> allItems = new ArrayList<>();
         for (Map.Entry<String, List<ConfigDocItem>> entry : sortedConfigItemsByExtension.entrySet()) {
             final List<ConfigDocItem> configDocItems = entry.getValue();
             // sort the items

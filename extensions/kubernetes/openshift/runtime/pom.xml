@@ -20,6 +20,14 @@
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-kubernetes-client-internal</artifactId>
         </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-container-image-openshift</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-kubernetes</artifactId>
+        </dependency>
     </dependencies>
 
     <build>
@@ -27,6 +35,14 @@
             <plugin>
                 <groupId>io.quarkus</groupId>
                 <artifactId>quarkus-bootstrap-maven-plugin</artifactId>
+                <configuration>
+                    <capabilities>
+                        <providesIf>
+                            <positive>io.quarkus.container.image.openshift.deployment.OpenshiftBuild</positive>
+                            <name>io.quarkus.openshift</name>
+                        </providesIf>
+                    </capabilities>
+                </configuration>
             </plugin>
             <plugin>
                 <artifactId>maven-compiler-plugin</artifactId>

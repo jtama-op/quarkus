@@ -2,16 +2,22 @@ package io.quarkus.test.junit.mockito.internal;
 
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Field;
+import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.Set;
 
+import javax.enterprise.inject.spi.Bean;
+import javax.enterprise.inject.spi.BeanManager;
 import javax.inject.Qualifier;
 
 import org.mockito.Mockito;
 
 import io.quarkus.arc.Arc;
+import io.quarkus.arc.ArcContainer;
 import io.quarkus.arc.ClientProxy;
-import io.quarkus.arc.InstanceHandle;
+import io.quarkus.arc.InjectableBean;
 import io.quarkus.test.junit.callback.QuarkusTestAfterConstructCallback;
 import io.quarkus.test.junit.mockito.InjectMock;
 
@@ -25,15 +31,17 @@ public class CreateMockitoMocksCallback implements QuarkusTestAfterConstructCall
                 InjectMock injectMockAnnotation = field.getAnnotation(InjectMock.class);
                 if (injectMockAnnotation != null) {
                     Object beanInstance = getBeanInstance(testInstance, field, InjectMock.class);
-                    Object mock = createMockAndSetTestField(testInstance, field, beanInstance);
-                    MockitoMocksTracker.track(testInstance, mock, beanInstance);
+                    Optional<Object> result = createMockAndSetTestField(testInstance, field, beanInstance);
+                    if (result.isPresent()) {
+                        MockitoMocksTracker.track(testInstance, result.get(), beanInstance);
+                    }
                 }
             }
             current = current.getSuperclass();
         }
     }
 
-    private Object createMockAndSetTestField(Object testInstance, Field field, Object beanInstance) {
+    private Optional<Object> createMockAndSetTestField(Object testInstance, Field field, Object beanInstance) {
         Class<?> beanClass = beanInstance.getClass();
         // make sure we don't mock proxy classes, especially given that they don't have generics info
         if (ClientProxy.class.isAssignableFrom(beanClass)) {
@@ -41,26 +49,50 @@ public class CreateMockitoMocksCallback implements QuarkusTestAfterConstructCall
             if (beanClass.getSuperclass() != Object.class)
                 beanClass = beanClass.getSuperclass();
         }
-        Object mock = Mockito.mock(beanClass);
+        Object mock;
+        boolean isNew;
+        Optional<Object> currentMock = MockitoMocksTracker.currentMock(testInstance, beanInstance);
+        if (currentMock.isPresent()) {
+            mock = currentMock.get();
+            isNew = false;
+        } else {
+            mock = Mockito.mock(beanClass);
+            isNew = true;
+        }
         field.setAccessible(true);
         try {
             field.set(testInstance, mock);
         } catch (IllegalAccessException e) {
             throw new RuntimeException(e);
         }
-        return mock;
+        if (isNew) {
+            return Optional.of(mock);
+        } else {
+            return Optional.empty();
+        }
     }
 
     static Object getBeanInstance(Object testInstance, Field field, Class<? extends Annotation> annotationType) {
-        Class<?> fieldClass = field.getType();
-        InstanceHandle<?> instance = Arc.container().instance(fieldClass, getQualifiers(field));
-        if (!instance.isAvailable()) {
+        Type fieldType = field.getGenericType();
+        Annotation[] qualifiers = getQualifiers(field);
+        ArcContainer container = Arc.container();
+        BeanManager beanManager = container.beanManager();
+        Set<Bean<?>> beans = beanManager.getBeans(fieldType, qualifiers);
+        if (beans.isEmpty()) {
             throw new IllegalStateException(
-                    "Invalid use of " + annotationType.getTypeName() + " - could not determine bean of type: "
-                            + fieldClass + ". Offending field is " + field.getName() + " of test class "
+                    "Invalid use of " + annotationType.getTypeName() + " - could not resolve the bean of type: "
+                            + fieldType.getTypeName() + ". Offending field is " + field.getName() + " of test class "
                             + testInstance.getClass());
         }
-        return instance.get();
+        Bean<?> bean = beanManager.resolve(beans);
+        if (!beanManager.isNormalScope(bean.getScope())) {
+            throw new IllegalStateException(
+                    "Invalid use of " + annotationType.getTypeName()
+                            + " - the injected bean does not declare a CDI normal scope but: " + bean.getScope().getName()
+                            + ". Offending field is " + field.getName() + " of test class "
+                            + testInstance.getClass());
+        }
+        return container.instance((InjectableBean<?>) bean).get();
     }
 
     static Annotation[] getQualifiers(Field fieldToMock) {

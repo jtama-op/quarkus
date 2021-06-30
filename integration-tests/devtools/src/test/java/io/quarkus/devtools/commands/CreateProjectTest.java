@@ -4,7 +4,6 @@ import static io.quarkus.devtools.testing.SnapshotTesting.checkContains;
 import static io.quarkus.devtools.testing.SnapshotTesting.checkMatches;
 import static io.quarkus.platform.tools.ToolsConstants.PROP_COMPILER_PLUGIN_VERSION;
 import static io.quarkus.platform.tools.ToolsConstants.PROP_SUREFIRE_PLUGIN_VERSION;
-import static io.quarkus.platform.tools.ToolsUtils.readQuarkusProperties;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -30,11 +29,13 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
-import io.quarkus.devtools.PlatformAwareTestBase;
 import io.quarkus.devtools.commands.data.QuarkusCommandException;
 import io.quarkus.devtools.commands.data.QuarkusCommandOutcome;
 import io.quarkus.devtools.project.BuildTool;
+import io.quarkus.devtools.project.QuarkusProject;
+import io.quarkus.devtools.project.QuarkusProjectHelper;
 import io.quarkus.devtools.project.codegen.writer.FileProjectWriter;
+import io.quarkus.devtools.testing.PlatformAwareTestBase;
 import io.quarkus.devtools.testing.SnapshotTesting;
 import io.quarkus.maven.utilities.MojoUtils;
 
@@ -51,7 +52,7 @@ public class CreateProjectTest extends PlatformAwareTestBase {
                 .className("org.acme.getting.started.GreetingResource")
                 .resourcePath("/foo")
                 .extensions(Collections.singleton("resteasy")));
-        final Properties quarkusProp = readQuarkusProperties(getPlatformDescriptor());
+        final Properties quarkusProp = getQuarkusProperties();
         assertThat(projectDir.resolve(".gitignore"))
                 .exists()
                 .satisfies(checkMatches("(?s).*target/\\R.*"));
@@ -123,18 +124,18 @@ public class CreateProjectTest extends PlatformAwareTestBase {
                 .satisfies(checkContains("<artifactId>quarkus-spring-web</artifactId>"))
                 .satisfies(checkContains("<artifactId>quarkus-resteasy</artifactId>"));
 
-        assertThat(projectDir.resolve("src/main/java/io/test/SpringGreetingController.java"))
+        assertThat(projectDir.resolve("src/main/java/io/test/GreetingController.java"))
                 .exists()
                 .satisfies(checkContains("package io.test;"))
                 .satisfies(checkContains("@RestController"))
-                .satisfies(checkContains("class SpringGreetingController"))
-                .satisfies(checkContains("@RequestMapping(\"/hello-spring\")"));
+                .satisfies(checkContains("class GreetingController"))
+                .satisfies(checkContains("@RequestMapping(\"/greeting\")"));
 
         assertThat(projectDir.resolve("src/main/java/io/test/GreetingResource.java"))
                 .exists()
                 .satisfies(checkContains("package io.test;"))
                 .satisfies(checkContains("class GreetingResource"))
-                .satisfies(checkContains("@Path(\"/hello-resteasy\")"));
+                .satisfies(checkContains("@Path(\"/hello\")"));
     }
 
     @Test
@@ -142,8 +143,7 @@ public class CreateProjectTest extends PlatformAwareTestBase {
         final File file = new File("target/create-resteasy-gradle");
         final Path projectDir = file.toPath();
         SnapshotTesting.deleteTestDirectory(file);
-        assertCreateProject(newCreateProject(projectDir)
-                .buildTool(BuildTool.GRADLE)
+        assertCreateProject(newCreateProject(projectDir, BuildTool.GRADLE)
                 .groupId("io.foo")
                 .packageName("my.project")
                 .artifactId("resteasy-app")
@@ -175,7 +175,11 @@ public class CreateProjectTest extends PlatformAwareTestBase {
     }
 
     private CreateProject newCreateProject(Path dir) {
-        return new CreateProject(dir, getPlatformDescriptor());
+        return newCreateProject(dir, BuildTool.MAVEN);
+    }
+
+    private CreateProject newCreateProject(Path dir, BuildTool buildTool) {
+        return new CreateProject(QuarkusProjectHelper.getProject(dir, buildTool));
     }
 
     @Test
@@ -192,7 +196,8 @@ public class CreateProjectTest extends PlatformAwareTestBase {
         final File pom = new File(testDir, "pom.xml");
         MojoUtils.write(model, pom);
         assertThatExceptionOfType(QuarkusCommandException.class).isThrownBy(() -> {
-            new CreateProject(testDir.toPath(), getPlatformDescriptor())
+            final QuarkusProject project = QuarkusProjectHelper.getProject(testDir.toPath(), BuildTool.MAVEN);
+            new CreateProject(project)
                     .groupId("something.is")
                     .artifactId("wrong")
                     .version("1.0.0-SNAPSHOT")
@@ -211,7 +216,8 @@ public class CreateProjectTest extends PlatformAwareTestBase {
         List<Callable<Void>> collect = IntStream.range(0, 15).boxed().map(i -> (Callable<Void>) () -> {
             File tempDir = Files.createTempDirectory("test").toFile();
             FileProjectWriter write = new FileProjectWriter(tempDir);
-            final QuarkusCommandOutcome result = new CreateProject(tempDir.toPath(), getPlatformDescriptor())
+            final QuarkusProject project = QuarkusProjectHelper.getProject(tempDir.toPath(), BuildTool.MAVEN);
+            final QuarkusCommandOutcome result = new CreateProject(project)
                     .groupId("org.acme")
                     .artifactId("acme")
                     .version("1.0.0-SNAPSHOT")
@@ -230,8 +236,7 @@ public class CreateProjectTest extends PlatformAwareTestBase {
     private void assertCreateProject(CreateProject createProject)
             throws QuarkusCommandException {
         final QuarkusCommandOutcome result = createProject
-                .quarkusMavenPluginVersion("2.3.5")
-                .quarkusGradlePluginVersion("2.3.5-gradle")
+                .quarkusPluginVersion("2.3.5")
                 .execute();
         assertTrue(result.isSuccess());
     }

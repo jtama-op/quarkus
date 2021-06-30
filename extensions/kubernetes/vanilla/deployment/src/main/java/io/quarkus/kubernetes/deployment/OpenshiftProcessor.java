@@ -87,10 +87,14 @@ public class OpenshiftProcessor {
             List<KubernetesPortBuildItem> ports) {
 
         List<ConfiguratorBuildItem> result = new ArrayList<>();
-        result.addAll(KubernetesCommonHelper.createPlatformConfigurators(config));
-        result.addAll(KubernetesCommonHelper.createGlobalConfigurators(ports));
+
+        KubernetesCommonHelper.combinePorts(ports, config).entrySet().forEach(e -> {
+            result.add(new ConfiguratorBuildItem(new AddPortToOpenshiftConfig(e.getValue())));
+        });
+        result.add(new ConfiguratorBuildItem(new ApplyExpositionConfigurator(config.route)));
 
         if (!capabilities.isPresent(Capability.CONTAINER_IMAGE_S2I)
+                && !capabilities.isPresent("io.quarkus.openshift")
                 && !capabilities.isPresent(Capability.CONTAINER_IMAGE_OPENSHIFT)) {
             result.add(new ConfiguratorBuildItem(new DisableS2iConfigurator()));
 
@@ -189,15 +193,15 @@ public class OpenshiftProcessor {
         // Probe port handling
         Integer port = ports.stream().filter(p -> HTTP_PORT.equals(p.getName())).map(KubernetesPortBuildItem::getPort)
                 .findFirst().orElse(DEFAULT_HTTP_PORT);
-        result.add(new DecoratorBuildItem(OPENSHIFT, new ApplyHttpGetActionPortDecorator(port)));
+        result.add(new DecoratorBuildItem(OPENSHIFT, new ApplyHttpGetActionPortDecorator(name, name, port)));
 
         // Hanlde non-s2i
         if (!capabilities.isPresent(Capability.CONTAINER_IMAGE_S2I)
+                && !capabilities.isPresent("io.quarkus.openshift")
                 && !capabilities.isPresent(Capability.CONTAINER_IMAGE_OPENSHIFT)) {
             result.add(new DecoratorBuildItem(OPENSHIFT, new RemoveDeploymentTriggerDecorator()));
         }
 
         return result;
     }
-
 }

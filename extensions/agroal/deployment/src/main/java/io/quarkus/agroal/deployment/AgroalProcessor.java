@@ -24,15 +24,16 @@ import io.quarkus.agroal.runtime.DataSourceSupport;
 import io.quarkus.agroal.runtime.DataSources;
 import io.quarkus.agroal.runtime.DataSourcesJdbcBuildTimeConfig;
 import io.quarkus.agroal.runtime.TransactionIntegration;
-import io.quarkus.agroal.spi.DefaultDataSourceDbKindBuildItem;
 import io.quarkus.agroal.spi.JdbcDataSourceBuildItem;
 import io.quarkus.agroal.spi.JdbcDriverBuildItem;
 import io.quarkus.arc.deployment.AdditionalBeanBuildItem;
 import io.quarkus.arc.deployment.SyntheticBeanBuildItem;
 import io.quarkus.arc.processor.DotNames;
 import io.quarkus.datasource.common.runtime.DataSourceUtil;
+import io.quarkus.datasource.deployment.spi.DefaultDataSourceDbKindBuildItem;
 import io.quarkus.datasource.runtime.DataSourceBuildTimeConfig;
 import io.quarkus.datasource.runtime.DataSourcesBuildTimeConfig;
+import io.quarkus.datasource.runtime.DataSourcesExcludedFromHealthChecks;
 import io.quarkus.datasource.runtime.DataSourcesRuntimeConfig;
 import io.quarkus.deployment.Capabilities;
 import io.quarkus.deployment.Capability;
@@ -41,12 +42,12 @@ import io.quarkus.deployment.annotations.BuildProducer;
 import io.quarkus.deployment.annotations.BuildStep;
 import io.quarkus.deployment.annotations.ExecutionTime;
 import io.quarkus.deployment.annotations.Record;
-import io.quarkus.deployment.builditem.CapabilityBuildItem;
 import io.quarkus.deployment.builditem.ExtensionSslNativeSupportBuildItem;
 import io.quarkus.deployment.builditem.FeatureBuildItem;
 import io.quarkus.deployment.builditem.SslNativeConfigBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.NativeImageResourceBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.ReflectiveClassBuildItem;
+import io.quarkus.deployment.pkg.builditem.CurateOutcomeBuildItem;
 import io.quarkus.runtime.configuration.ConfigurationException;
 import io.quarkus.smallrye.health.deployment.spi.HealthBuildItem;
 
@@ -58,10 +59,8 @@ class AgroalProcessor {
     private static final DotName DATA_SOURCE = DotName.createSimple(javax.sql.DataSource.class.getName());
 
     @BuildStep
-    void agroal(BuildProducer<FeatureBuildItem> feature,
-            BuildProducer<CapabilityBuildItem> capability) {
+    void agroal(BuildProducer<FeatureBuildItem> feature) {
         feature.produce(new FeatureBuildItem(Feature.AGROAL));
-        capability.produce(new CapabilityBuildItem(Capability.AGROAL));
     }
 
     @BuildStep
@@ -73,7 +72,8 @@ class AgroalProcessor {
             BuildProducer<ReflectiveClassBuildItem> reflectiveClass,
             BuildProducer<NativeImageResourceBuildItem> resource,
             BuildProducer<ExtensionSslNativeSupportBuildItem> sslNativeSupport,
-            BuildProducer<AggregatedDataSourceBuildTimeConfigBuildItem> aggregatedConfig) throws Exception {
+            BuildProducer<AggregatedDataSourceBuildTimeConfigBuildItem> aggregatedConfig,
+            CurateOutcomeBuildItem curateOutcomeBuildItem) throws Exception {
         if (dataSourcesBuildTimeConfig.driver.isPresent() || dataSourcesBuildTimeConfig.url.isPresent()) {
             throw new ConfigurationException(
                     "quarkus.datasource.url and quarkus.datasource.driver have been deprecated in Quarkus 1.3 and removed in 1.9. "
@@ -82,7 +82,7 @@ class AgroalProcessor {
 
         List<AggregatedDataSourceBuildTimeConfigBuildItem> aggregatedDataSourceBuildTimeConfigs = getAggregatedConfigBuildItems(
                 dataSourcesBuildTimeConfig,
-                dataSourcesJdbcBuildTimeConfig,
+                dataSourcesJdbcBuildTimeConfig, curateOutcomeBuildItem,
                 jdbcDriverBuildItems, defaultDbKinds);
 
         if (aggregatedDataSourceBuildTimeConfigs.isEmpty()) {
@@ -257,13 +257,16 @@ class AgroalProcessor {
     private List<AggregatedDataSourceBuildTimeConfigBuildItem> getAggregatedConfigBuildItems(
             DataSourcesBuildTimeConfig dataSourcesBuildTimeConfig,
             DataSourcesJdbcBuildTimeConfig dataSourcesJdbcBuildTimeConfig,
-            List<JdbcDriverBuildItem> jdbcDriverBuildItems, List<DefaultDataSourceDbKindBuildItem> defaultDbKinds) {
+            CurateOutcomeBuildItem curateOutcomeBuildItem,
+            List<JdbcDriverBuildItem> jdbcDriverBuildItems,
+            List<DefaultDataSourceDbKindBuildItem> defaultDbKinds) {
         List<AggregatedDataSourceBuildTimeConfigBuildItem> dataSources = new ArrayList<>();
 
-        Optional<String> effectiveDbKind = dataSourcesBuildTimeConfig.defaultDataSource.dbKind;
-        if (!effectiveDbKind.isPresent() && (defaultDbKinds.size() == 1)) {
-            effectiveDbKind = Optional.of(defaultDbKinds.get(0).getDbKind());
-        }
+        Optional<String> effectiveDbKind = DefaultDataSourceDbKindBuildItem
+                .resolve(dataSourcesBuildTimeConfig.defaultDataSource.dbKind, defaultDbKinds,
+                        dataSourcesBuildTimeConfig.defaultDataSource.devservices.enabled
+                                .orElse(dataSourcesBuildTimeConfig.namedDataSources.isEmpty()),
+                        curateOutcomeBuildItem);
 
         if (effectiveDbKind.isPresent()) {
             if (dataSourcesJdbcBuildTimeConfig.jdbc.enabled) {
@@ -282,11 +285,18 @@ class AgroalProcessor {
             if (!jdbcBuildTimeConfig.enabled) {
                 continue;
             }
+            Optional<String> dbKind = DefaultDataSourceDbKindBuildItem
+                    .resolve(entry.getValue().dbKind, defaultDbKinds,
+                            true,
+                            curateOutcomeBuildItem);
+            if (!dbKind.isPresent()) {
+                continue;
+            }
             dataSources.add(new AggregatedDataSourceBuildTimeConfigBuildItem(entry.getKey(),
                     entry.getValue(),
                     jdbcBuildTimeConfig,
-                    entry.getValue().dbKind.get(),
-                    resolveDriver(entry.getKey(), entry.getValue().dbKind.get(), jdbcBuildTimeConfig, jdbcDriverBuildItems)));
+                    dbKind.get(),
+                    resolveDriver(entry.getKey(), dbKind.get(), jdbcBuildTimeConfig, jdbcDriverBuildItems)));
         }
 
         return dataSources;
@@ -323,8 +333,19 @@ class AgroalProcessor {
     }
 
     @BuildStep
-    HealthBuildItem addHealthCheck(DataSourcesBuildTimeConfig dataSourcesBuildTimeConfig) {
-        return new HealthBuildItem("io.quarkus.agroal.runtime.health.DataSourceHealthCheck",
-                dataSourcesBuildTimeConfig.healthEnabled);
+    @Record(ExecutionTime.STATIC_INIT)
+    HealthBuildItem addHealthCheck(Capabilities capabilities, DataSourcesBuildTimeConfig dataSourcesBuildTimeConfig,
+            AgroalRecorder recorder, BuildProducer<SyntheticBeanBuildItem> syntheticBeans) {
+        if (capabilities.isPresent(Capability.SMALLRYE_HEALTH)) {
+            syntheticBeans.produce(SyntheticBeanBuildItem.configure(DataSourcesExcludedFromHealthChecks.class)
+                    .scope(Singleton.class)
+                    .unremovable()
+                    .supplier(recorder.dataSourcesExcludedFromHealthChecks(dataSourcesBuildTimeConfig))
+                    .done());
+            return new HealthBuildItem("io.quarkus.agroal.runtime.health.DataSourceHealthCheck",
+                    dataSourcesBuildTimeConfig.healthEnabled);
+        } else {
+            return null;
+        }
     }
 }

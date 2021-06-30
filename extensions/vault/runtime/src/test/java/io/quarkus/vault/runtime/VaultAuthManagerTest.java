@@ -16,6 +16,11 @@ import io.quarkus.runtime.TlsConfig;
 import io.quarkus.vault.runtime.client.VaultClient;
 import io.quarkus.vault.runtime.client.VaultClientException;
 import io.quarkus.vault.runtime.client.VertxVaultClient;
+import io.quarkus.vault.runtime.client.authmethod.VaultInternalAppRoleAuthMethod;
+import io.quarkus.vault.runtime.client.authmethod.VaultInternalKubernetesAuthMethod;
+import io.quarkus.vault.runtime.client.authmethod.VaultInternalTokenAuthMethod;
+import io.quarkus.vault.runtime.client.authmethod.VaultInternalUserpassAuthMethod;
+import io.quarkus.vault.runtime.client.backend.VaultInternalSystemBackend;
 import io.quarkus.vault.runtime.client.dto.auth.VaultLookupSelf;
 import io.quarkus.vault.runtime.client.dto.auth.VaultRenewSelf;
 import io.quarkus.vault.runtime.client.dto.auth.VaultRenewSelfAuth;
@@ -35,7 +40,10 @@ public class VaultAuthManagerTest {
     AtomicBoolean lookupSelfShouldReturn403 = new AtomicBoolean(false);
     VaultConfigHolder vaultConfigHolder = new VaultConfigHolder().setVaultBootstrapConfig(config);
     VaultClient vaultClient = createVaultClient();
-    VaultAuthManager vaultAuthManager = new VaultAuthManager(vaultConfigHolder, vaultClient);
+    VaultAuthManager vaultAuthManager = new VaultAuthManager(vaultConfigHolder,
+            new VaultInternalSystemBackend(), new VaultInternalAppRoleAuthMethod(),
+            new VaultInternalKubernetesAuthMethod(), createUserpassAuthMethod(),
+            createTokenAuthMethod());
     VaultUserPassAuth vaultUserPassAuth = new VaultUserPassAuth();
     VaultLookupSelf vaultLookupSelf = new VaultLookupSelf();
     VaultRenewSelf vaultRenewSelf = new VaultRenewSelf();
@@ -117,6 +125,7 @@ public class VaultAuthManagerTest {
             config.authentication.userpass.passwordWrappingToken = Optional.empty();
             config.connectTimeout = Duration.ofSeconds(1);
             config.readTimeout = Duration.ofSeconds(1);
+            config.nonProxyHosts = Optional.empty();
             config.tls.skipVerify = Optional.of(true);
             config.logConfidentialityLevel = LogConfidentialityLevel.LOW;
             config.renewGracePeriod = Duration.ofSeconds(3);
@@ -127,12 +136,13 @@ public class VaultAuthManagerTest {
     }
 
     private VaultClient createVaultClient() {
-        VertxVaultClient vaultClient = new VertxVaultClient(vaultConfigHolder, tlsConfig) {
-            @Override
-            public VaultUserPassAuth loginUserPass(String user, String password) {
-                return vaultUserPassAuth;
-            }
+        VertxVaultClient vaultClient = new VertxVaultClient(vaultConfigHolder, tlsConfig);
+        vaultClient.init();
+        return vaultClient;
+    }
 
+    private VaultInternalTokenAuthMethod createTokenAuthMethod() {
+        return new VaultInternalTokenAuthMethod() {
             @Override
             public VaultLookupSelf lookupSelf(String token) {
                 if (lookupSelfShouldReturn403.get()) {
@@ -146,8 +156,14 @@ public class VaultAuthManagerTest {
                 return vaultRenewSelf;
             }
         };
-        vaultClient.init();
-        return vaultClient;
     }
 
+    private VaultInternalUserpassAuthMethod createUserpassAuthMethod() {
+        return new VaultInternalUserpassAuthMethod() {
+            @Override
+            public VaultUserPassAuth login(String user, String password) {
+                return vaultUserPassAuth;
+            }
+        };
+    }
 }

@@ -161,7 +161,7 @@ public class CreateProjectCodestartMojoIT extends QuarkusPlatformAwareMojoTestBa
         request.setDebug(false);
         request.setShowErrors(true);
         request.setProperties(params);
-        getEnv().forEach(request::addShellEnvironment);
+
         PrintStreamLogger logger = getPrintStreamLogger("create-codestart.log");
         invoker.setLogger(logger);
         return invoker.execute(request);

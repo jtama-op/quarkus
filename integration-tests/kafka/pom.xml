@@ -13,10 +13,6 @@
     <name>Quarkus - Integration Tests - Kafka</name>
     <description>The Apache Kafka integration tests module</description>
 
-    <properties>
-        <maven.compiler.parameters>true</maven.compiler.parameters>
-    </properties>
-
     <dependencies>
         <dependency>
             <groupId>io.quarkus</groupId>
@@ -31,10 +27,6 @@
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-resteasy</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>io.quarkus</groupId>
-            <artifactId>quarkus-resteasy-jackson</artifactId>
         </dependency>
         <dependency>
             <groupId>io.quarkus</groupId>
@@ -77,19 +69,18 @@
             </exclusions>
         </dependency>
         <dependency>
-            <groupId>io.debezium</groupId>
-            <artifactId>debezium-core</artifactId>
+            <groupId>io.strimzi</groupId>
+            <artifactId>strimzi-test-container</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
-            <groupId>io.debezium</groupId>
-            <artifactId>debezium-core</artifactId>
-            <type>test-jar</type>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
-            <groupId>org.apache.kafka</groupId>
-            <artifactId>kafka_2.12</artifactId>
+            <groupId>org.awaitility</groupId>
+            <artifactId>awaitility</artifactId>
             <scope>test</scope>
         </dependency>
 
@@ -123,19 +114,6 @@
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-resteasy-deployment</artifactId>
-            <version>${project.version}</version>
-            <type>pom</type>
-            <scope>test</scope>
-            <exclusions>
-                <exclusion>
-                    <groupId>*</groupId>
-                    <artifactId>*</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-        <dependency>
-            <groupId>io.quarkus</groupId>
-            <artifactId>quarkus-resteasy-jackson-deployment</artifactId>
             <version>${project.version}</version>
             <type>pom</type>
             <scope>test</scope>

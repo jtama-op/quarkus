@@ -12,7 +12,9 @@ public class JacksonRecorder {
 
             @Override
             public JacksonConfigSupport get() {
-                return new JacksonConfigSupport(jacksonBuildTimeConfig.failOnUnknownProperties);
+                return new JacksonConfigSupport(jacksonBuildTimeConfig.failOnUnknownProperties,
+                        jacksonBuildTimeConfig.writeDatesAsTimestamps, jacksonBuildTimeConfig.acceptCaseInsensitiveEnums,
+                        jacksonBuildTimeConfig.timezone.orElse(null));
             }
         };
     }

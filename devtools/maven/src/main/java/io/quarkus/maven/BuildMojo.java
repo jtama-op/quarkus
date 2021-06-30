@@ -5,8 +5,12 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Stream;
 
 import org.apache.maven.artifact.Artifact;
@@ -32,7 +36,6 @@ import io.quarkus.bootstrap.util.IoUtils;
 @Mojo(name = "build", defaultPhase = LifecyclePhase.PACKAGE, requiresDependencyResolution = ResolutionScope.COMPILE_PLUS_RUNTIME, threadSafe = true)
 public class BuildMojo extends QuarkusBootstrapMojo {
 
-    public static final String QUARKUS_PACKAGE_UBER_JAR = "quarkus.package.uber-jar";
     private static final String PACKAGE_TYPE_PROP = "quarkus.package.type";
     private static final String NATIVE_PROFILE_NAME = "native";
     private static final String NATIVE_PACKAGE_TYPE = "native";
@@ -62,6 +65,12 @@ public class BuildMojo extends QuarkusBootstrapMojo {
     @Parameter(property = "skipOriginalJarRename")
     boolean skipOriginalJarRename;
 
+    /**
+     * The list of system properties defined for the plugin.
+     */
+    @Parameter
+    private Map<String, String> systemProperties = Collections.emptyMap();
+
     @Override
     protected boolean beforeExecute() throws MojoExecutionException {
         if (skip) {
@@ -82,9 +91,19 @@ public class BuildMojo extends QuarkusBootstrapMojo {
 
     @Override
     protected void doExecute() throws MojoExecutionException {
-
         try {
-            boolean clearPackageTypeSysProp = false;
+            Set<String> propertiesToClear = new HashSet<>();
+
+            // Add the system properties of the plugin to the system properties
+            // if and only if they are not already set.
+            for (Map.Entry<String, String> entry : systemProperties.entrySet()) {
+                String key = entry.getKey();
+                if (System.getProperty(key) == null) {
+                    System.setProperty(key, entry.getValue());
+                    propertiesToClear.add(key);
+                }
+            }
+
             // Essentially what this does is to enable the native package type even if a different package type is set
             // in application properties. This is done to preserve what users expect to happen when
             // they execute "mvn package -Dnative" even if quarkus.package.type has been set in application.properties
@@ -96,7 +115,16 @@ public class BuildMojo extends QuarkusBootstrapMojo {
                     packageType = packageTypeProp.toString();
                 }
                 System.setProperty(PACKAGE_TYPE_PROP, packageType);
-                clearPackageTypeSysProp = true;
+                propertiesToClear.add(PACKAGE_TYPE_PROP);
+            }
+            if (!propertiesToClear.isEmpty() && mavenSession().getRequest().getDegreeOfConcurrency() > 1) {
+                getLog().warn("*****************************************************************");
+                getLog().warn("* Your build is requesting parallel execution, but the project  *");
+                getLog().warn("* relies on System properties at build time which could cause   *");
+                getLog().warn("* race condition issues thus unpredictable build results.       *");
+                getLog().warn("* Please avoid using System properties or avoid enabling        *");
+                getLog().warn("* parallel execution                                            *");
+                getLog().warn("*****************************************************************");
             }
             try (CuratedApplication curatedApplication = bootstrapApplication()) {
 
@@ -127,9 +155,8 @@ public class BuildMojo extends QuarkusBootstrapMojo {
                     }
                 }
             } finally {
-                if (clearPackageTypeSysProp) {
-                    System.clearProperty(PACKAGE_TYPE_PROP);
-                }
+                // Clear all the system properties set by the plugin
+                propertiesToClear.forEach(System::clearProperty);
             }
         } catch (Exception e) {
             throw new MojoExecutionException("Failed to build quarkus application", e);

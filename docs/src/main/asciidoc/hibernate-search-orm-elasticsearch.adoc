@@ -1,7 +1,7 @@
 ////
 This guide is maintained in the main Quarkus repository
 and pull requests should be submitted there:
-https://github.com/quarkusio/quarkus/tree/master/docs/src/main/asciidoc
+https://github.com/quarkusio/quarkus/tree/main/docs/src/main/asciidoc
 ////
 = Quarkus - Hibernate Search guide
 :hibernate-search-doc-prefix: https://docs.jboss.org/hibernate/search/6.0/reference/en-US/html_single/
@@ -18,7 +18,7 @@ To complete this guide, you need:
 
 * less than 20 minutes
 * an IDE
-* JDK 1.8+ installed with `JAVA_HOME` configured appropriately
+* JDK 11+ installed with `JAVA_HOME` configured appropriately
 * Apache Maven {maven-version}
 * Docker
 * link:building-native-image[GraalVM installed if you want to run in native mode]
@@ -707,7 +707,7 @@ Entities are attached to a persistence unit by
 link:hibernate-orm#multiple-persistence-units-attaching-model-classes[configuring the Hibernate ORM extension].
 
 [[multiple-persistence-units-attaching-cdi]]
-=== CDI integration
+== CDI integration
 
 You can inject Hibernate Search's main entry points, `SearchSession` and `SearchMapping`, using CDI:
 
@@ -762,6 +762,78 @@ We also inject some data and execute the mass indexer.
 In a real life application, it is obviously something you won't do at startup.
 ====
 
+[[offline-startup]]
+== Offline startup
+
+By default, Hibernate Search sends a few requests to the Elasticsearch cluster on startup.
+If the Elasticsearch cluster is not necessarily up and running when Hibernate Search starts,
+this could cause a startup failure.
+
+To address this, you can configure Hibernate Search to not send any request on startup:
+
+* Disable Elasticsearch version checks on startup by setting the configuration property
+  link:#quarkus-hibernate-search-orm-elasticsearch_quarkus.hibernate-search-orm.elasticsearch.version-check.enabled[`quarkus.hibernate-search-orm.elasticsearch.version-check.enabled`]
+  to `false`.
+* Disable schema management on startup by setting the configuration property
+  link:#quarkus-hibernate-search-orm-elasticsearch_quarkus.hibernate-search-orm.schema-management.strategy[`quarkus.hibernate-search-orm.schema-management.strategy`]
+  to `none`.
+
+Of course, even with this configuration, Hibernate Search still won't be able to index anything or run search queries
+until the Elasticsearch cluster becomes accessible.
+
+[IMPORTANT]
+====
+If you disable automatic schema creation by setting `quarkus.hibernate-search-orm.schema-management.strategy` to `none`,
+you will have to create the schema manually at some point before your application starts persisting/updating entities
+and executing search requests.
+
+See link:{hibernate-search-doc-prefix}#mapper-orm-schema-management-manager[this section of the reference documentation]
+for more information.
+====
+
+[[aws-request-signing]]
+== AWS request signing
+
+If you need to use https://docs.aws.amazon.com/elasticsearch-service/[Amazon’s managed Elasticsearch service],
+you will find it requires a proprietary authentication method involving request signing.
+
+To enable AWS request signing, an additional extension is required:
+
+[source,bash]
+----
+./mvnw quarkus:add-extension -Dextensions="hibernate-search-orm-elasticsearch-aws"
+----
+
+Once the extension is there, you will need some more configuration:
+
+* Configure the AWS region with
+link:#quarkus-hibernate-search-orm-elasticsearch-aws_quarkus.hibernate-search-orm.elasticsearch.aws.region[`quarkus.hibernate-search-orm.elasticsearch.aws.region`].
+* Enable request signing with
+link:#quarkus-hibernate-search-orm-elasticsearch-aws_quarkus.hibernate-search-orm.elasticsearch.aws.signing.enabled[`quarkus.hibernate-search-orm.elasticsearch.aws.signing.enabled`].
+* Optionally, configure how credentials are retrieved with
+link:#quarkus-hibernate-search-orm-elasticsearch-aws_quarkus.hibernate-search-orm.elasticsearch.aws.credentials.type[`quarkus.hibernate-search-orm.elasticsearch.aws.credentials.type`].
+The default gets the credentials from the application environment (AWS instance role, ...),
+but several more options are available.
+
+For example:
+
+[source,properties]
+----
+quarkus.hibernate-search-orm.elasticsearch.aws.region=us-east-1
+quarkus.hibernate-search-orm.elasticsearch.aws.signing.enabled=true
+----
+
+Or, if credentials are not available in the application environment (AWS instance role, ...):
+
+[source,properties]
+----
+quarkus.hibernate-search-orm.elasticsearch.aws.region=us-east-1
+quarkus.hibernate-search-orm.elasticsearch.aws.signing.enabled=true
+quarkus.hibernate-search-orm.elasticsearch.aws.credentials.type=static
+quarkus.hibernate-search-orm.elasticsearch.aws.credentials.static-provider.access-key-id=AKIDEXAMPLE
+quarkus.hibernate-search-orm.elasticsearch.aws.credentials.static-provider.secret-access-key=wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY
+----
+
 == Further reading
 
 If you are interested in learning more about Hibernate Search 6,
@@ -780,6 +852,9 @@ We don't have plans to support the Lucene backend in Quarkus for now.
 
 [[configuration-reference]]
 == Hibernate Search Configuration Reference
+
+[[configuration-reference-main]]
+=== Main Configuration
 
 include::{generated-dir}/config/quarkus-hibernate-search-orm-elasticsearch.adoc[leveloffset=+1, opts=optional]
 
@@ -805,3 +880,10 @@ Other formats are also accepted, but are only useful for advanced use cases.
 See link:{hibernate-search-doc-prefix}#configuration-bean-reference-parsing[this section of Hibernate Search's reference documentation]
 for more information.
 ====
+
+:no-duration-note: true
+
+[[configuration-reference-aws]]
+=== AWS Integration Configuration
+
+include::{generated-dir}/config/quarkus-hibernate-search-orm-elasticsearch-aws.adoc[leveloffset=+1, opts=optional]

@@ -12,17 +12,16 @@ import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 
 import io.quarkus.vault.VaultException;
-import io.quarkus.vault.VaultTransitExportKeyType;
-import io.quarkus.vault.VaultTransitKeyDetail;
 import io.quarkus.vault.VaultTransitSecretEngine;
-import io.quarkus.vault.runtime.client.VaultClient;
 import io.quarkus.vault.runtime.client.VaultClientException;
 import io.quarkus.vault.runtime.client.dto.transit.VaultTransitCreateKeyBody;
 import io.quarkus.vault.runtime.client.dto.transit.VaultTransitDecrypt;
@@ -35,6 +34,7 @@ import io.quarkus.vault.runtime.client.dto.transit.VaultTransitEncryptBody;
 import io.quarkus.vault.runtime.client.dto.transit.VaultTransitEncryptDataBatchResult;
 import io.quarkus.vault.runtime.client.dto.transit.VaultTransitKeyConfigBody;
 import io.quarkus.vault.runtime.client.dto.transit.VaultTransitKeyExport;
+import io.quarkus.vault.runtime.client.dto.transit.VaultTransitKeyVersionData;
 import io.quarkus.vault.runtime.client.dto.transit.VaultTransitReadKeyData;
 import io.quarkus.vault.runtime.client.dto.transit.VaultTransitRewrapBatchInput;
 import io.quarkus.vault.runtime.client.dto.transit.VaultTransitRewrapBody;
@@ -46,6 +46,7 @@ import io.quarkus.vault.runtime.client.dto.transit.VaultTransitVerify;
 import io.quarkus.vault.runtime.client.dto.transit.VaultTransitVerifyBatchInput;
 import io.quarkus.vault.runtime.client.dto.transit.VaultTransitVerifyBody;
 import io.quarkus.vault.runtime.client.dto.transit.VaultTransitVerifyDataBatchResult;
+import io.quarkus.vault.runtime.client.secretengine.VaultInternalTransitSecretEngine;
 import io.quarkus.vault.runtime.config.TransitKeyConfig;
 import io.quarkus.vault.runtime.config.VaultBootstrapConfig;
 import io.quarkus.vault.runtime.transit.DecryptionResult;
@@ -59,6 +60,7 @@ import io.quarkus.vault.transit.EncryptionRequest;
 import io.quarkus.vault.transit.KeyConfigRequestDetail;
 import io.quarkus.vault.transit.KeyCreationRequestDetail;
 import io.quarkus.vault.transit.RewrappingRequest;
+import io.quarkus.vault.transit.SignVerifyOptions;
 import io.quarkus.vault.transit.SigningInput;
 import io.quarkus.vault.transit.SigningRequest;
 import io.quarkus.vault.transit.TransitContext;
@@ -66,7 +68,13 @@ import io.quarkus.vault.transit.VaultDecryptionBatchException;
 import io.quarkus.vault.transit.VaultEncryptionBatchException;
 import io.quarkus.vault.transit.VaultRewrappingBatchException;
 import io.quarkus.vault.transit.VaultSigningBatchException;
+import io.quarkus.vault.transit.VaultTransitAsymmetricKeyDetail;
+import io.quarkus.vault.transit.VaultTransitAsymmetricKeyVersion;
+import io.quarkus.vault.transit.VaultTransitExportKeyType;
+import io.quarkus.vault.transit.VaultTransitKeyDetail;
 import io.quarkus.vault.transit.VaultTransitKeyExportDetail;
+import io.quarkus.vault.transit.VaultTransitSymmetricKeyDetail;
+import io.quarkus.vault.transit.VaultTransitSymmetricKeyVersion;
 import io.quarkus.vault.transit.VaultVerificationBatchException;
 import io.quarkus.vault.transit.VerificationRequest;
 
@@ -76,9 +84,9 @@ public class VaultTransitManager implements VaultTransitSecretEngine {
     @Inject
     private VaultAuthManager vaultAuthManager;
     @Inject
-    private VaultClient vaultClient;
-    @Inject
     private VaultConfigHolder vaultConfigHolder;
+    @Inject
+    private VaultInternalTransitSecretEngine vaultInternalTransitSecretEngine;
 
     private VaultBootstrapConfig getConfig() {
         return vaultConfigHolder.getVaultBootstrapConfig();
@@ -108,7 +116,7 @@ public class VaultTransitManager implements VaultTransitSecretEngine {
             body.type = config.type.orElse(null);
             body.convergentEncryption = config.convergentEncryption.orElse(null);
         }
-        VaultTransitEncrypt encrypt = vaultClient.encrypt(getToken(), keyName, body);
+        VaultTransitEncrypt encrypt = vaultInternalTransitSecretEngine.encrypt(getToken(), keyName, body);
         EncryptionResult result = new EncryptionResult(encrypt.data.ciphertext, encrypt.data.error);
         if (result.isInError()) {
             Map<EncryptionRequest, EncryptionResult> errorMap = new HashMap<>();
@@ -148,7 +156,7 @@ public class VaultTransitManager implements VaultTransitSecretEngine {
             body.convergentEncryption = config.convergentEncryption.orElse(null);
         }
 
-        VaultTransitEncrypt encrypt = vaultClient.encrypt(getToken(), keyName, body);
+        VaultTransitEncrypt encrypt = vaultInternalTransitSecretEngine.encrypt(getToken(), keyName, body);
         return encrypt.data.batchResults.stream().map(this::getVaultTransitEncryptBatchResult).collect(toList());
     }
 
@@ -180,7 +188,7 @@ public class VaultTransitManager implements VaultTransitSecretEngine {
             keyName = config.name.orElse(keyName);
         }
 
-        VaultTransitDecrypt decrypt = vaultClient.decrypt(getToken(), keyName, body);
+        VaultTransitDecrypt decrypt = vaultInternalTransitSecretEngine.decrypt(getToken(), keyName, body);
         return decrypt.data.batchResults.stream().map(this::getVaultTransitDecryptBatchResult).collect(toList());
     }
 
@@ -215,7 +223,7 @@ public class VaultTransitManager implements VaultTransitSecretEngine {
             keyName = config.name.orElse(keyName);
         }
 
-        VaultTransitEncrypt encrypt = vaultClient.rewrap(getToken(), keyName, body);
+        VaultTransitEncrypt encrypt = vaultInternalTransitSecretEngine.rewrap(getToken(), keyName, body);
         return encrypt.data.batchResults.stream().map(this::getVaultTransitEncryptBatchResult).collect(toList());
     }
 
@@ -228,27 +236,37 @@ public class VaultTransitManager implements VaultTransitSecretEngine {
 
     @Override
     public String sign(String keyName, SigningInput input, TransitContext transitContext) {
+        return sign(keyName, input, null, transitContext);
+    }
+
+    @Override
+    public String sign(String keyName, SigningInput input, SignVerifyOptions options, TransitContext transitContext) {
         SigningRequest item = new SigningRequest(input, transitContext);
         List<SigningRequestResultPair> pairs = singletonList(new SigningRequestResultPair(item));
-        signBatch(keyName, NO_KEY_VERSION, pairs);
+        signBatch(keyName, NO_KEY_VERSION, pairs, options);
         return pairs.get(0).getResult().getValueOrElseError();
     }
 
     @Override
     public Map<SigningRequest, String> sign(String keyName, List<SigningRequest> requests) {
+        return sign(keyName, requests, null);
+    }
+
+    @Override
+    public Map<SigningRequest, String> sign(String keyName, List<SigningRequest> requests, SignVerifyOptions options) {
 
         List<SigningRequestResultPair> pairs = requests.stream().map(SigningRequestResultPair::new).collect(toList());
 
         pairs.stream()
                 .collect(groupingBy(SigningRequestResultPair::getKeyVersion))
-                .forEach((keyVersion, subpairs) -> signBatch(keyName, keyVersion, subpairs));
+                .forEach((keyVersion, subpairs) -> signBatch(keyName, keyVersion, subpairs, options));
 
         List<SigningResult> results = pairs.stream().map(SigningRequestResultPair::getResult).collect(toList());
         checkBatchErrors(results, errors -> new VaultSigningBatchException(errors + " signing errors", zip(requests, results)));
         return zipRequestToValue(requests, results);
     }
 
-    private void signBatch(String keyName, int keyVersion, List<SigningRequestResultPair> pairs) {
+    private void signBatch(String keyName, int keyVersion, List<SigningRequestResultPair> pairs, SignVerifyOptions options) {
 
         String hashAlgorithm = null;
 
@@ -267,7 +285,14 @@ public class VaultTransitManager implements VaultTransitSecretEngine {
             body.prehashed = config.prehashed.orElse(null);
         }
 
-        VaultTransitSign sign = vaultClient.sign(getToken(), keyName, hashAlgorithm, body);
+        if (options != null) {
+            hashAlgorithm = defaultIfNull(options.getHashAlgorithm(), hashAlgorithm);
+            body.signatureAlgorithm = defaultIfNull(options.getSignatureAlgorithm(), body.signatureAlgorithm);
+            body.prehashed = defaultIfNull(options.getPrehashed(), body.prehashed);
+            body.marshalingAlgorithm = defaultIfNull(options.getMarshalingAlgorithm(), null);
+        }
+
+        VaultTransitSign sign = vaultInternalTransitSecretEngine.sign(getToken(), keyName, hashAlgorithm, body);
 
         for (int i = 0; i < pairs.size(); i++) {
             VaultTransitSignDataBatchResult result = sign.data.batchResults.get(i);
@@ -284,8 +309,14 @@ public class VaultTransitManager implements VaultTransitSecretEngine {
 
     @Override
     public void verifySignature(String keyName, String signature, SigningInput input, TransitContext transitContext) {
+        verifySignature(keyName, signature, input, null, transitContext);
+    }
+
+    @Override
+    public void verifySignature(String keyName, String signature, SigningInput input, SignVerifyOptions options,
+            TransitContext transitContext) {
         VerificationRequest item = new VerificationRequest(signature, input, transitContext);
-        Boolean valid = verifyBatch(keyName, singletonList(item)).get(0).getValueOrElseError();
+        Boolean valid = verifyBatch(keyName, singletonList(item), options).get(0).getValueOrElseError();
         if (!TRUE.equals(valid)) {
             throw new VaultException(INVALID_SIGNATURE);
         }
@@ -293,12 +324,18 @@ public class VaultTransitManager implements VaultTransitSecretEngine {
 
     @Override
     public void verifySignature(String keyName, List<VerificationRequest> requests) {
-        List<VerificationResult> results = verifyBatch(keyName, requests);
+        verifySignature(keyName, requests, null);
+    }
+
+    @Override
+    public void verifySignature(String keyName, List<VerificationRequest> requests, SignVerifyOptions options) {
+        List<VerificationResult> results = verifyBatch(keyName, requests, options);
         Map<VerificationRequest, VerificationResult> resultMap = zip(requests, results);
         checkBatchErrors(results, errors -> new VaultVerificationBatchException(errors + " verification errors", resultMap));
     }
 
-    private List<VerificationResult> verifyBatch(String keyName, List<VerificationRequest> requests) {
+    private List<VerificationResult> verifyBatch(String keyName, List<VerificationRequest> requests,
+            SignVerifyOptions options) {
 
         String hashAlgorithm = null;
 
@@ -309,11 +346,18 @@ public class VaultTransitManager implements VaultTransitSecretEngine {
         if (config != null) {
             keyName = config.name.orElse(keyName);
             hashAlgorithm = config.hashAlgorithm.orElse(null);
-            body.prehashed = config.prehashed.orElse(null);
             body.signatureAlgorithm = config.signatureAlgorithm.orElse(null);
+            body.prehashed = config.prehashed.orElse(null);
         }
 
-        VaultTransitVerify verify = vaultClient.verify(getToken(), keyName, hashAlgorithm, body);
+        if (options != null) {
+            hashAlgorithm = defaultIfNull(options.getHashAlgorithm(), hashAlgorithm);
+            body.signatureAlgorithm = defaultIfNull(options.getSignatureAlgorithm(), body.signatureAlgorithm);
+            body.prehashed = defaultIfNull(options.getPrehashed(), body.prehashed);
+            body.marshalingAlgorithm = defaultIfNull(options.getMarshalingAlgorithm(), null);
+        }
+
+        VaultTransitVerify verify = vaultInternalTransitSecretEngine.verify(getToken(), keyName, hashAlgorithm, body);
         return verify.data.batchResults.stream().map(this::getVaultTransitVerifyBatchResult).collect(toList());
     }
 
@@ -327,7 +371,7 @@ public class VaultTransitManager implements VaultTransitSecretEngine {
             body.exportable = detail.getExportable();
             body.type = detail.getType();
         }
-        vaultClient.createTransitKey(getToken(), keyName, body);
+        vaultInternalTransitSecretEngine.createTransitKey(getToken(), keyName, body);
     }
 
     @Override
@@ -338,17 +382,18 @@ public class VaultTransitManager implements VaultTransitSecretEngine {
         body.minEncryptionVersion = detail.getMinEncryptionVersion();
         body.minDecryptionVersion = detail.getMinDecryptionVersion();
         body.exportable = detail.getExportable();
-        vaultClient.updateTransitKeyConfiguration(getToken(), keyName, body);
+        vaultInternalTransitSecretEngine.updateTransitKeyConfiguration(getToken(), keyName, body);
     }
 
     @Override
     public void deleteKey(String keyName) {
-        vaultClient.deleteTransitKey(getToken(), keyName);
+        vaultInternalTransitSecretEngine.deleteTransitKey(getToken(), keyName);
     }
 
     @Override
     public VaultTransitKeyExportDetail exportKey(String keyName, VaultTransitExportKeyType keyType, String keyVersion) {
-        VaultTransitKeyExport keyExport = vaultClient.exportTransitKey(getToken(), keyType.name() + "-key", keyName,
+        VaultTransitKeyExport keyExport = vaultInternalTransitSecretEngine.exportTransitKey(getToken(), keyType.name() + "-key",
+                keyName,
                 keyVersion);
         VaultTransitKeyExportDetail detail = new VaultTransitKeyExportDetail();
         detail.setName(keyExport.data.name);
@@ -357,9 +402,9 @@ public class VaultTransitManager implements VaultTransitSecretEngine {
     }
 
     @Override
-    public VaultTransitKeyDetail readKey(String keyName) {
+    public VaultTransitKeyDetail<?> readKey(String keyName) {
         try {
-            return map(vaultClient.readTransitKey(getToken(), keyName).data);
+            return map(vaultInternalTransitSecretEngine.readTransitKey(getToken(), keyName).data);
         } catch (VaultClientException e) {
             if (e.getStatus() == 404) {
                 return null;
@@ -371,17 +416,30 @@ public class VaultTransitManager implements VaultTransitSecretEngine {
 
     @Override
     public List<String> listKeys() {
-        return vaultClient.listTransitKeys(getToken()).data.keys;
+        return vaultInternalTransitSecretEngine.listTransitKeys(getToken()).data.keys;
     }
 
-    protected VaultTransitKeyDetail map(VaultTransitReadKeyData data) {
-        VaultTransitKeyDetail result = new VaultTransitKeyDetail();
+    protected VaultTransitKeyDetail<?> map(VaultTransitReadKeyData data) {
+        VaultTransitKeyVersionData latestVersionData = data.keys.get(Integer.toString(data.latestVersion));
+        VaultTransitKeyDetail<?> result;
+        if (latestVersionData.publicKey != null) {
+            Map<String, VaultTransitAsymmetricKeyVersion> versions = data.keys.entrySet().stream()
+                    .collect(Collectors.toMap(Entry::getKey, VaultTransitManager::mapAsymmetricKeyVersion));
+            result = new VaultTransitAsymmetricKeyDetail()
+                    .setVersions(versions);
+        } else {
+            Map<String, VaultTransitSymmetricKeyVersion> versions = data.keys.entrySet().stream()
+                    .collect(Collectors.toMap(Entry::getKey, VaultTransitManager::mapSymmetricKeyVersion));
+            result = new VaultTransitSymmetricKeyDetail()
+                    .setVersions(versions);
+        }
         result.setDetail(data.detail);
         result.setDeletionAllowed(data.deletionAllowed);
         result.setDerived(data.derived);
         result.setExportable(data.exportable);
         result.setAllowPlaintextBackup(data.allowPlaintextBackup);
-        result.setKeys(data.keys);
+        result.setLatestVersion(data.latestVersion);
+        result.setMinAvailableVersion(data.minAvailableVersion);
         result.setMinDecryptionVersion(data.minDecryptionVersion);
         result.setMinEncryptionVersion(data.minEncryptionVersion);
         result.setName(data.name);
@@ -389,7 +447,25 @@ public class VaultTransitManager implements VaultTransitSecretEngine {
         result.setSupportsDecryption(data.supportsDecryption);
         result.setSupportsDerivation(data.supportsDerivation);
         result.setSupportsSigning(data.supportsSigning);
+        result.setType(data.type);
         return result;
+    }
+
+    private static VaultTransitAsymmetricKeyVersion mapAsymmetricKeyVersion(
+            Map.Entry<String, VaultTransitKeyVersionData> entry) {
+        VaultTransitKeyVersionData data = entry.getValue();
+        VaultTransitAsymmetricKeyVersion version = new VaultTransitAsymmetricKeyVersion();
+        version.setName(data.name);
+        version.setPublicKey(data.publicKey);
+        version.setCreationTime(data.creationTime);
+        return version;
+    }
+
+    private static VaultTransitSymmetricKeyVersion mapSymmetricKeyVersion(Map.Entry<String, VaultTransitKeyVersionData> entry) {
+        VaultTransitKeyVersionData data = entry.getValue();
+        VaultTransitSymmetricKeyVersion version = new VaultTransitSymmetricKeyVersion();
+        version.setCreationTime(data.creationTime);
+        return version;
     }
 
     // ---
@@ -481,6 +557,12 @@ public class VaultTransitManager implements VaultTransitSecretEngine {
         Map<K, V> map = new IdentityHashMap<>();
         IntStream.range(0, keys.size()).forEach(i -> map.put(keys.get(i), f.apply(values.get(i))));
         return map;
+    }
+
+    private <T> T defaultIfNull(T value, T defaultValue) {
+        if (value != null)
+            return value;
+        return defaultValue;
     }
 
 }

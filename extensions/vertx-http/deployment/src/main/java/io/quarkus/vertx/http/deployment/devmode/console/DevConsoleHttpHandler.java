@@ -59,6 +59,7 @@ public class DevConsoleHttpHandler implements Consumer<DevConsoleRequest> {
         WritableByteChannel byteChannel;
         final DevConsoleRequest request;
         final DevConsoleResponse responseBuilder = new DevConsoleResponse();
+        private volatile VirtualClientConnection connection;
 
         public NettyResponseHandler(DevConsoleRequest request) {
             this.request = request;
@@ -106,6 +107,9 @@ public class DevConsoleHttpHandler implements Consumer<DevConsoleRequest> {
                         responseBuilder.setBody(baos.toByteArray());
                     }
                     getFuture().complete(responseBuilder);
+                    if (connection != null) {
+                        connection.close();
+                    }
                 }
             } catch (Throwable ex) {
                 getFuture().completeExceptionally(ex);
@@ -122,14 +126,22 @@ public class DevConsoleHttpHandler implements Consumer<DevConsoleRequest> {
                 getFuture().completeExceptionally(new RuntimeException("Connection closed"));
             }
         }
+
+        public void setConnection(VirtualClientConnection connection) {
+            this.connection = connection;
+        }
+
+        public VirtualClientConnection getConnection() {
+            return connection;
+        }
     }
 
     private void nettyDispatch(DevConsoleRequest request)
             throws Exception {
-        String path = request.getPath();
+        String uri = request.getUri();
         QuarkusHttpHeaders quarkusHeaders = new QuarkusHttpHeaders();
         DefaultHttpRequest nettyRequest = new DefaultHttpRequest(HttpVersion.HTTP_1_1,
-                HttpMethod.valueOf(request.getMethod()), path, quarkusHeaders);
+                HttpMethod.valueOf(request.getMethod()), uri, quarkusHeaders);
         for (Map.Entry<String, List<String>> i : request.getHeaders().entrySet()) {
             nettyRequest.headers().add(i.getKey(), i.getValue());
         }
@@ -145,6 +157,7 @@ public class DevConsoleHttpHandler implements Consumer<DevConsoleRequest> {
         NettyResponseHandler handler = new NettyResponseHandler(request);
         VirtualClientConnection connection = VirtualClientConnection.connect(handler, QUARKUS_DEV_CONSOLE,
                 null);
+        handler.setConnection(connection);
 
         connection.sendMessage(nettyRequest);
         connection.sendMessage(requestContent);

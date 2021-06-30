@@ -9,6 +9,9 @@ import java.io.Reader;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Type;
 import java.util.Map;
+import javax.json.JsonArray;
+import javax.json.JsonObject;
+import javax.json.JsonValue;
 import javax.ws.rs.RuntimeType;
 import javax.ws.rs.WebApplicationException;
 import javax.ws.rs.client.Entity;
@@ -30,6 +33,9 @@ import org.jboss.resteasy.reactive.common.providers.serialisers.InputStreamMessa
 import org.jboss.resteasy.reactive.common.providers.serialisers.NumberMessageBodyHandler;
 import org.jboss.resteasy.reactive.common.providers.serialisers.ReaderBodyHandler;
 import org.jboss.resteasy.reactive.common.providers.serialisers.StringMessageBodyHandler;
+import org.jboss.resteasy.reactive.common.providers.serialisers.jsonp.JsonArrayHandler;
+import org.jboss.resteasy.reactive.common.providers.serialisers.jsonp.JsonObjectHandler;
+import org.jboss.resteasy.reactive.common.providers.serialisers.jsonp.JsonValueHandler;
 
 public class ClientSerialisers extends Serialisers {
 
@@ -50,6 +56,9 @@ public class ClientSerialisers extends Serialisers {
             new BuiltinReader(MultivaluedMap.class, FormUrlEncodedProvider.class, MediaType.APPLICATION_FORM_URLENCODED,
                     RuntimeType.CLIENT),
             new BuiltinReader(Object.class, ClientDefaultTextPlainBodyHandler.class, MediaType.TEXT_PLAIN, RuntimeType.CLIENT),
+            new BuiltinReader(JsonArray.class, JsonArrayHandler.class, MediaType.APPLICATION_JSON, RuntimeType.CLIENT),
+            new BuiltinReader(JsonObject.class, JsonObjectHandler.class, MediaType.APPLICATION_JSON, RuntimeType.CLIENT),
+            new BuiltinReader(JsonValue.class, JsonValueHandler.class, MediaType.APPLICATION_JSON, RuntimeType.CLIENT)
     };
     public static BuiltinWriter[] BUILTIN_WRITERS = new BuiltinWriter[] {
             new BuiltinWriter(String.class, StringMessageBodyHandler.class,
@@ -124,12 +133,12 @@ public class ClientSerialisers extends Serialisers {
     }
 
     @Override
-    public BuiltinWriter[] getBultinWriters() {
+    public BuiltinWriter[] getBuiltinWriters() {
         return BUILTIN_WRITERS;
     }
 
     @Override
-    public BuiltinReader[] getBultinReaders() {
+    public BuiltinReader[] getBuiltinReaders() {
         return BUILTIN_READERS;
     }
 }

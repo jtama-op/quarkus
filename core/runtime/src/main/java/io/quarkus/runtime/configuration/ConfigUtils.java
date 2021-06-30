@@ -1,44 +1,52 @@
 package io.quarkus.runtime.configuration;
 
-import java.io.FileNotFoundException;
+import static io.smallrye.config.DotEnvConfigSourceProvider.dotEnvSources;
+import static io.smallrye.config.PropertiesConfigSourceProvider.classPathSources;
+import static io.smallrye.config.SmallRyeConfig.SMALLRYE_CONFIG_LOCATIONS;
+import static io.smallrye.config.SmallRyeConfig.SMALLRYE_CONFIG_PROFILE;
+import static io.smallrye.config.SmallRyeConfig.SMALLRYE_CONFIG_PROFILE_PARENT;
+import static io.smallrye.config.SmallRyeConfigBuilder.META_INF_MICROPROFILE_CONFIG_PROPERTIES;
+
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.Serializable;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.NoSuchFileException;
-import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
-import java.util.Properties;
+import java.util.OptionalInt;
 import java.util.Set;
 import java.util.SortedSet;
 import java.util.TreeMap;
 import java.util.TreeSet;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.BiConsumer;
 import java.util.function.IntFunction;
-import java.util.regex.Pattern;
 
+import org.eclipse.microprofile.config.Config;
+import org.eclipse.microprofile.config.ConfigProvider;
 import org.eclipse.microprofile.config.spi.ConfigSource;
 import org.eclipse.microprofile.config.spi.ConfigSourceProvider;
-import org.jboss.logging.Logger;
 
+import io.quarkus.runtime.LaunchMode;
+import io.smallrye.config.ConfigSourceInterceptor;
+import io.smallrye.config.ConfigSourceInterceptorContext;
+import io.smallrye.config.ConfigSourceInterceptorFactory;
+import io.smallrye.config.DotEnvConfigSourceProvider;
+import io.smallrye.config.EnvConfigSource;
+import io.smallrye.config.Expressions;
+import io.smallrye.config.FallbackConfigSourceInterceptor;
+import io.smallrye.config.Priorities;
+import io.smallrye.config.RelocateConfigSourceInterceptor;
 import io.smallrye.config.SmallRyeConfigBuilder;
+import io.smallrye.config.SysPropConfigSource;
+import io.smallrye.config.common.utils.ConfigSourceUtil;
 
 /**
  *
  */
 public final class ConfigUtils {
-    private static final Logger log = Logger.getLogger("io.quarkus.config");
-
     private ConfigUtils() {
     }
 
@@ -54,8 +62,8 @@ public final class ConfigUtils {
         return size -> new TreeSet<>();
     }
 
-    public static SmallRyeConfigBuilder configBuilder(final boolean runTime) {
-        return configBuilder(runTime, true);
+    public static SmallRyeConfigBuilder configBuilder(final boolean runTime, LaunchMode launchMode) {
+        return configBuilder(runTime, true, launchMode);
     }
 
     /**
@@ -65,35 +73,85 @@ public final class ConfigUtils {
      * @param addDiscovered {@code true} if the ConfigSource and Converter objects should be auto-discovered
      * @return the configuration builder
      */
-    public static SmallRyeConfigBuilder configBuilder(final boolean runTime, final boolean addDiscovered) {
-        final SmallRyeConfigBuilder builder = new SmallRyeConfigBuilder();
-        final ApplicationPropertiesConfigSource.InFileSystem inFileSystem = new ApplicationPropertiesConfigSource.InFileSystem();
-        final ApplicationPropertiesConfigSource.InJar inJar = new ApplicationPropertiesConfigSource.InJar();
-        final ApplicationPropertiesConfigSource.MpConfigInJar mpConfig = new ApplicationPropertiesConfigSource.MpConfigInJar();
-        builder.withSources(inFileSystem, inJar, mpConfig, new DotEnvConfigSource());
-        builder.withProfile(ProfileManager.getActiveProfile());
-        builder.addDefaultInterceptors();
+    public static SmallRyeConfigBuilder configBuilder(final boolean runTime, final boolean addDiscovered,
+            LaunchMode launchMode) {
+        return configBuilder(runTime, false, addDiscovered, launchMode);
+    }
+
+    /**
+     * Get the basic configuration builder.
+     *
+     * @param runTime {@code true} if the configuration is run time, {@code false} if build time
+     * @param addDiscovered {@code true} if the ConfigSource and Converter objects should be auto-discovered
+     * @return the configuration builder
+     */
+    public static SmallRyeConfigBuilder configBuilder(final boolean runTime, final boolean bootstrap,
+            final boolean addDiscovered,
+            LaunchMode launchMode) {
+        final SmallRyeConfigBuilder builder = emptyConfigBuilder();
+
         final ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
+        builder.withSources(new ApplicationPropertiesConfigSourceLoader.InFileSystem().getConfigSources(classLoader));
+        builder.withSources(new ApplicationPropertiesConfigSourceLoader.InClassPath().getConfigSources(classLoader));
+        if (launchMode.isDevOrTest() && (runTime || bootstrap)) {
+            builder.withSources(new RuntimeOverrideConfigSource(classLoader));
+        }
         if (runTime) {
             builder.addDefaultSources();
+            builder.withSources(dotEnvSources(classLoader));
         } else {
             final List<ConfigSource> sources = new ArrayList<>();
-            sources.addAll(
-                    new QuarkusPropertiesConfigSourceProvider("META-INF/microprofile-config.properties", true, classLoader)
-                            .getConfigSources(classLoader));
-            // required by spec...
-            sources.addAll(
-                    new QuarkusPropertiesConfigSourceProvider("WEB-INF/classes/META-INF/microprofile-config.properties", true,
-                            classLoader).getConfigSources(classLoader));
-            sources.add(new EnvConfigSource());
-            sources.add(new SysPropConfigSource());
+            sources.addAll(classPathSources(META_INF_MICROPROFILE_CONFIG_PROPERTIES, classLoader));
+            sources.addAll(new BuildTimeDotEnvConfigSourceProvider().getConfigSources(classLoader));
+            sources.add(new BuildTimeEnvConfigSource());
+            sources.add(new BuildTimeSysPropConfigSource());
             builder.withSources(sources);
         }
         if (addDiscovered) {
             builder.addDiscoveredSources();
-            builder.addDiscoveredInterceptors();
-            builder.addDiscoveredConverters();
         }
+        return builder;
+    }
+
+    public static SmallRyeConfigBuilder emptyConfigBuilder() {
+        final SmallRyeConfigBuilder builder = new SmallRyeConfigBuilder();
+        builder.withDefaultValue(SMALLRYE_CONFIG_PROFILE, ProfileManager.getActiveProfile());
+
+        final Map<String, String> relocations = new HashMap<>();
+        relocations.put(SMALLRYE_CONFIG_LOCATIONS, "quarkus.config.locations");
+        relocations.put(SMALLRYE_CONFIG_PROFILE_PARENT, "quarkus.config.profile.parent");
+        // Override the priority, because of the ProfileConfigSourceInterceptor and profile.parent.
+        builder.withInterceptorFactories(new ConfigSourceInterceptorFactory() {
+            @Override
+            public ConfigSourceInterceptor getInterceptor(final ConfigSourceInterceptorContext context) {
+                return new RelocateConfigSourceInterceptor(relocations);
+            }
+
+            @Override
+            public OptionalInt getPriority() {
+                return OptionalInt.of(Priorities.LIBRARY + 600 - 5);
+            }
+        });
+
+        final Map<String, String> fallbacks = new HashMap<>();
+        fallbacks.put("quarkus.config.locations", SMALLRYE_CONFIG_LOCATIONS);
+        fallbacks.put("quarkus.config.profile.parent", SMALLRYE_CONFIG_PROFILE_PARENT);
+        builder.withInterceptorFactories(new ConfigSourceInterceptorFactory() {
+            @Override
+            public ConfigSourceInterceptor getInterceptor(final ConfigSourceInterceptorContext context) {
+                return new FallbackConfigSourceInterceptor(fallbacks);
+            }
+
+            @Override
+            public OptionalInt getPriority() {
+                return OptionalInt.of(Priorities.LIBRARY + 400 - 5);
+            }
+        });
+
+        builder.addDefaultInterceptors();
+        builder.addDiscoveredInterceptors();
+        builder.addDiscoveredConverters();
+        builder.addDiscoveredValidator();
         return builder;
     }
 
@@ -122,107 +180,95 @@ public final class ConfigUtils {
         }
     }
 
-    static class EnvConfigSource implements ConfigSource, Serializable {
-        private static final String NULL_SENTINEL = new String(""); //must be a new string, used for == comparison
-        private static final long serialVersionUID = 8786096039970882529L;
+    /**
+     * Checks if a property is present in the current Configuration.
+     *
+     * Because the sources may not expose the property directly in {@link ConfigSource#getPropertyNames()}, we cannot
+     * reliable determine if the property is present in the properties list. The property needs to be retrieved to make
+     * sure it exists. Also, if the value is an expression, we want to ignore expansion, because this is not relevant
+     * for the check and the expansion value may not be available at this point.
+     *
+     * It may be interesting to expose such API in SmallRyeConfig directly.
+     *
+     * @param propertyName the property name.
+     * @return true if the property is present or false otherwise.
+     */
+    public static boolean isPropertyPresent(String propertyName) {
+        Config config = ConfigProvider.getConfig();
+        return Expressions.withoutExpansion(() -> config.getOptionalValue(propertyName, String.class)).isPresent();
+    }
 
-        static final Pattern REP_PATTERN = Pattern.compile("[^a-zA-Z0-9_]");
-        private final Map<String, String> cache = new ConcurrentHashMap<>(); //the regex match is expensive
-
-        EnvConfigSource() {
+    /**
+     * We override the EnvConfigSource, because we don't want the nothing back from getPropertiesNames at build time.
+     * The mapping is one way and there is no way to map them back.
+     */
+    static class BuildTimeEnvConfigSource extends EnvConfigSource {
+        BuildTimeEnvConfigSource() {
+            super();
         }
 
-        public int getOrdinal() {
-            return 300;
+        BuildTimeEnvConfigSource(final Map<String, String> propertyMap, final int ordinal) {
+            super(propertyMap, ordinal);
         }
 
-        public Map<String, String> getProperties() {
-            return Collections.emptyMap();
+        @Override
+        public Set<String> getPropertyNames() {
+            return new HashSet<>();
         }
 
-        public String getValue(final String propertyName) {
-            String val = cache.get(propertyName);
-            if (val != null) {
-                if (val == NULL_SENTINEL) {
-                    return null;
-                }
-                return val;
-            }
-            val = getRawValue(REP_PATTERN.matcher(propertyName.toUpperCase(Locale.ROOT)).replaceAll("_"));
-            cache.put(propertyName, val == null ? NULL_SENTINEL : val);
-            return val;
-        }
-
-        String getRawValue(final String name) {
-            return System.getenv(name);
-        }
-
+        @Override
         public String getName() {
             return "System environment";
         }
     }
 
-    static class DotEnvConfigSource extends EnvConfigSource {
-        private static final long serialVersionUID = -6718168105190376482L;
-
-        private final Map<String, String> values;
-
-        DotEnvConfigSource() {
-            this(Paths.get(System.getProperty("user.dir", "."), ".env"));
+    /**
+     * Same as BuildTimeEnvConfigSource.
+     */
+    static class BuildTimeDotEnvConfigSourceProvider extends DotEnvConfigSourceProvider {
+        public BuildTimeDotEnvConfigSourceProvider() {
+            super();
         }
 
-        DotEnvConfigSource(Path path) {
-            Map<String, String> values = new HashMap<>();
-            try (InputStream is = Files.newInputStream(path)) {
-                try (InputStreamReader isr = new InputStreamReader(is, StandardCharsets.UTF_8)) {
-                    final Properties properties = new Properties();
-                    properties.load(isr);
-                    for (String name : properties.stringPropertyNames()) {
-                        values.put(name, properties.getProperty(name));
-                    }
+        public BuildTimeDotEnvConfigSourceProvider(final String location) {
+            super(location);
+        }
+
+        @Override
+        protected ConfigSource loadConfigSource(final URL url, final int ordinal) throws IOException {
+            return new BuildTimeEnvConfigSource(ConfigSourceUtil.urlToMap(url), ordinal) {
+                @Override
+                public String getName() {
+                    return super.getName() + "[source=" + url + "]";
                 }
-            } catch (FileNotFoundException | NoSuchFileException ignored) {
-            } catch (IOException e) {
-                log.debug("Failed to load `.env` file", e);
-            }
-            this.values = values;
-        }
-
-        public int getOrdinal() {
-            return 295;
-        }
-
-        String getRawValue(final String name) {
-            return values.get(name);
-        }
-
-        public String getName() {
-            return ".env";
+            };
         }
     }
 
-    static final class SysPropConfigSource implements ConfigSource {
+    /**
+     * We only want to include properties in the quarkus namespace.
+     */
+    static class BuildTimeSysPropConfigSource extends SysPropConfigSource {
         public Map<String, String> getProperties() {
-            Map<String, String> output = new TreeMap<>();
-            for (Map.Entry<Object, Object> entry : System.getProperties().entrySet()) {
-                String key = (String) entry.getKey();
-                if (key.startsWith("quarkus.")) {
-                    output.put(key, entry.getValue().toString());
-                }
-            }
-            return output;
-        }
-
-        public String getValue(final String propertyName) {
-            return System.getProperty(propertyName);
+            BuildTimeSysPropMapProducer buildTimeSysPropMapProducer = new BuildTimeSysPropMapProducer();
+            System.getProperties().forEach(buildTimeSysPropMapProducer);
+            return buildTimeSysPropMapProducer.output;
         }
 
         public String getName() {
             return "System properties";
         }
+    }
 
-        public int getOrdinal() {
-            return 400;
+    private static class BuildTimeSysPropMapProducer implements BiConsumer<Object, Object> {
+        final Map<String, String> output = new TreeMap<>();
+
+        @Override
+        public void accept(Object k, Object v) {
+            String key = (String) k;
+            if (key.startsWith("quarkus.")) {
+                output.put(key, v.toString());
+            }
         }
     }
 }

@@ -1,7 +1,7 @@
 ////
 This guide is maintained in the main Quarkus repository
 and pull requests should be submitted there:
-https://github.com/quarkusio/quarkus/tree/master/docs/src/main/asciidoc
+https://github.com/quarkusio/quarkus/tree/main/docs/src/main/asciidoc
 ////
 = Quarkus - Testing Your Application
 
@@ -31,7 +31,7 @@ To complete this guide, you need:
 
 * less than 15 minutes
 * an IDE
-* JDK 1.8+ installed with `JAVA_HOME` configured appropriately
+* JDK 11+ installed with `JAVA_HOME` configured appropriately
 * Apache Maven {maven-version}
 * The completed greeter application from the link:getting-started[Getting Started Guide]
 
@@ -39,6 +39,8 @@ To complete this guide, you need:
 
 In this guide, we expand on the initial test that was created as part of the Getting Started Guide.
 We cover injection into tests and also how to test native executables.
+
+NOTE: Quarkus supports Continuous testing, but this is covered by the link:continuous-testing[Continuous Testing Guide].
 
 == Solution
 
@@ -330,7 +332,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.UUID;
 
-import static io.restassured.RestAssured.given;
+import static io.restassured.RestAssured.when;
 import static org.hamcrest.CoreMatchers.is;
 
 @QuarkusTest
@@ -339,8 +341,7 @@ public class GreetingResourceTest {
 
     @Test
     public void testHelloEndpoint() {
-        given()
-          .when().get()    //<2>
+        when().get()    //<2>
           .then()
              .statusCode(200)
              .body(is("hello"));
@@ -440,8 +441,6 @@ Alternatively or additionally to an interceptor, you can enrich *all* your `@Qua
 * `io.quarkus.test.junit.callback.QuarkusTestAfterConstructCallback`
 * `io.quarkus.test.junit.callback.QuarkusTestBeforeEachCallback`
 * `io.quarkus.test.junit.callback.QuarkusTestAfterEachCallback`
-
-WARNING: `io.quarkus.test.junit.callback.QuarkusTestBeforeAllCallback` has been deprecated in favor of `io.quarkus.test.junit.callback.QuarkusTestAfterConstructCallback` and will be removed in future releases of Quarkus
 
 Such a callback implementation has to be registered as a "service provider" as defined by `java.util.ServiceLoader`.
 
@@ -755,6 +754,10 @@ public class MockTestCase {
 Note that there is no dependency on Mockito, you can use any mocking library you like, or even manually override the
 objects to provide the behaviour you require.
 
+NOTE: Using `@Inject` will get you a CDI proxy to the mock instance you install, which is not suitable for passing to methods such as `Mockito.verify`
+which want the mock instance itself. So if you need to call methods such as `verify` you need to hang on to the mock instance in your test, or use `@InjectMock`
+as shown below.
+
 ==== Further simplification with `@InjectMock`
 
 Building on the features provided by `QuarkusMock`, Quarkus also allows users to effortlessly take advantage of link:https://site.mockito.org/[Mockito] for mocking the beans supported by `QuarkusMock`.
@@ -987,10 +990,67 @@ A very common need is to start some services on which your Quarkus application d
 By simply annotating any test in the test suite with `@QuarkusTestResource`, Quarkus will run the corresponding `QuarkusTestResourceLifecycleManager` before any tests are run.
 A test suite is also free to utilize multiple `@QuarkusTestResource` annotations, in which case all the corresponding `QuarkusTestResourceLifecycleManager` objects will be run before the tests. When using multiple test resources they can be started concurrently. For that you need to set `@QuarkusTestResource(parallel = true)`.
 
+NOTE: test resources are global, even if they are defined on a test class or custom profile, which means they will all be activated for all tests, even though we do
+remove duplicates. If you want to only enable a test resource on a single test class or test profile, you can use `@QuarkusTestResource(restrictToAnnotatedClass = true)`.
+
 Quarkus provides a few implementations of `QuarkusTestResourceLifecycleManager` out of the box (see `io.quarkus.test.h2.H2DatabaseTestResource` which starts an H2 database, or `io.quarkus.test.kubernetes.client.KubernetesMockServerTestResource` which starts a mock Kubernetes API server),
 but it is common to create custom implementations to address specific application needs.
-Common cases include starting docker containers using https://www.testcontainers.org/[Testcontainers] (an example of which can be found https://github.com/quarkusio/quarkus-quickstarts/blob/master/kafka-quickstart/src/test/java/org/acme/kafka/KafkaResource.java[here]),
-or starting a mock HTTP server using http://wiremock.org/[Wiremock] (an example of which can be found https://github.com/geoand/quarkus-test-demo/blob/master/src/test/java/org/acme/getting/started/country/WiremockCountries.java[here]).
+Common cases include starting docker containers using https://www.testcontainers.org/[Testcontainers] (an example of which can be found https://github.com/quarkusio/quarkus-quickstarts/blob/main/kafka-quickstart/src/test/java/org/acme/kafka/KafkaResource.java[here]),
+or starting a mock HTTP server using http://wiremock.org/[Wiremock] (an example of which can be found https://github.com/geoand/quarkus-test-demo/blob/main/src/test/java/org/acme/getting/started/country/WiremockCountries.java[here]).
+
+=== Annotation-based test resources
+
+It is possible to write test resources that are enabled and configured using annotations. This is enabled by placing the `@QuarkusTestResource`
+on an annotation which will be used to enable and configure the test resource.
+
+For example, this defines the `@WithKubernetesTestServer` annotation, which you can use on your tests to activate the `KubernetesServerTestResource`,
+but only for the annotated test class. You can also place them on your `QuarkusTestProfile` test profiles.
+
+[source,java]
+----
+@QuarkusTestResource(KubernetesServerTestResource.class)
+@Retention(RetentionPolicy.RUNTIME)
+@Target(ElementType.TYPE)
+public @interface WithKubernetesTestServer {
+    /**
+     * Start it with HTTPS
+     */
+    boolean https() default false;
+
+    /**
+     * Start it in CRUD mode
+     */
+    boolean crud() default true;
+
+    /**
+     * Port to use, defaults to any available port
+     */
+    int port() default 0;
+}
+----
+
+The `KubernetesServerTestResource` class has to implement the
+`QuarkusTestResourceConfigurableLifecycleManager` interface in order to be configured using the previous annotation:
+
+[source,java]
+----
+public class KubernetesServerTestResource
+        implements QuarkusTestResourceConfigurableLifecycleManager<WithKubernetesTestServer> {
+
+    private boolean https = false;
+    private boolean crud = true;
+    private int port = 0;
+
+    @Override
+    public void init(WithKubernetesTestServer annotation) {
+        this.https = annotation.https();
+        this.crud = annotation.crud();
+        this.port = annotation.port();
+    }
+
+    // ...
+}
+----
 
 == Hang Detection
 
@@ -1010,6 +1070,29 @@ guide except injecting into tests (and the native executable runs in a separate 
 
 
 This is covered in the link:building-native-image[Native Executable Guide].
+
+[WARNING]
+====
+Although `@NativeImageTest` is not yet deprecated, it will be in the future as it's functionality is covered by `@QuarkusIntegrationTest`
+which is described in the following section.
+====
+
+[#quarkus-integration-test]
+== Using @QuarkusIntegrationTest
+
+`@QuarkusIntegrationTest` should be used to launch and test the artifact produced by the Quarkus build, and supports testing a jar (of whichever type), a native image or container-image.
+Put simply, this means that if the result of a Quarkus build (`mvn package` or `gradle build`) is a jar, that jar will be launched as `java -jar ...` and tests run against it.
+If instead a native image was build, then the application is launched as `./application ...` and again the tests run against the running application.
+Finally, if a container image was created during the build (by using including the `quarkus-container-image-jib` or `quarkus-container-image-docker` extensions and having the
+`quarkus.container-image.build=true` property configured), then a container is created and run (this requires the `docker` executable being present).
+
+As is the case with `@NativeImageTest`, this is a black box test that supports the same set features and has the same limitations.
+
+[NOTE]
+====
+As the `@QuarkusIntegrationTest` tests the result of the build, it should be run as part of the integration test suite - i.e., via the `maven-failsafe-plugin` if using Maven or an additional task if using Gradle.
+These tests will **not** work if run in the same phase as `@QuarkusTest` as Quarkus has not yet created the final artifact.
+====
 
 [[test-from-ide]]
 == Running `@QuarkusTest` from an IDE

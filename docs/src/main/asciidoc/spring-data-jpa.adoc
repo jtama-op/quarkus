@@ -1,17 +1,14 @@
 ////
 This guide is maintained in the main Quarkus repository
 and pull requests should be submitted there:
-https://github.com/quarkusio/quarkus/tree/master/docs/src/main/asciidoc
+https://github.com/quarkusio/quarkus/tree/main/docs/src/main/asciidoc
 ////
 = Quarkus - Extension for Spring Data API
 
 include::./attributes.adoc[]
-:extension-status: preview
 
 While users are encouraged to use Hibernate ORM with Panache for Relational Database access, Quarkus provides a compatibility layer for
 Spring Data JPA repositories in the form of the `spring-data-jpa` extension.
-
-include::./status-include.adoc[]
 
 == Prerequisites
 
@@ -19,7 +16,7 @@ To complete this guide, you need:
 
 * less than 15 minutes
 * an IDE
-* JDK 1.8+ installed with `JAVA_HOME` configured appropriately
+* JDK 11+ installed with `JAVA_HOME` configured appropriately
 * Apache Maven {maven-version}
 
 == Solution
@@ -596,7 +593,7 @@ quarkus.hibernate-orm.implicit-naming-strategy=org.springframework.boot.orm.jpa.
 
 ==== More examples
 
-An extensive list of examples can be seen in the https://github.com/quarkusio/quarkus/tree/master/integration-tests/spring-data-jpa[integration tests] directory which is located inside the Quarkus source code.
+An extensive list of examples can be seen in the https://github.com/quarkusio/quarkus/tree/main/integration-tests/spring-data-jpa[integration tests] directory which is located inside the Quarkus source code.
 
 === What is currently unsupported
 

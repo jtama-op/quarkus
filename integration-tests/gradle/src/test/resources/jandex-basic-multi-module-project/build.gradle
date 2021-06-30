@@ -8,7 +8,6 @@ buildscript {
         } else {
             mavenLocal()
         }
-        jcenter()
         mavenCentral()
         gradlePluginPortal()
     }
@@ -39,18 +38,12 @@ subprojects {
         } else {
             mavenLocal()
         }
-        jcenter()
         mavenCentral()
     }
 
     dependencies {
-
         implementation 'io.quarkus:quarkus-resteasy'
 
-        testImplementation 'io.quarkus:quarkus-junit5'
-        testImplementation 'io.rest-assured:rest-assured'
-
         implementation enforcedPlatform("${quarkusPlatformGroupId}:${quarkusPlatformArtifactId}:${quarkusPlatformVersion}")
-
     }
 }

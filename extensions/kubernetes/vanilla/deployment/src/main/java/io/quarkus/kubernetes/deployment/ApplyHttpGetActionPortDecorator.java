@@ -1,20 +1,24 @@
 
 package io.quarkus.kubernetes.deployment;
 
-import io.dekorate.deps.kubernetes.api.model.HTTPGetActionFluent;
 import io.dekorate.kubernetes.decorator.AddLivenessProbeDecorator;
 import io.dekorate.kubernetes.decorator.AddReadinessProbeDecorator;
 import io.dekorate.kubernetes.decorator.AddSidecarDecorator;
 import io.dekorate.kubernetes.decorator.ApplicationContainerDecorator;
 import io.dekorate.kubernetes.decorator.Decorator;
 import io.dekorate.kubernetes.decorator.ResourceProvidingDecorator;
+import io.fabric8.kubernetes.api.model.HTTPGetActionFluent;
 
 public class ApplyHttpGetActionPortDecorator extends ApplicationContainerDecorator<HTTPGetActionFluent<?>> {
 
     private final Integer port;
 
     public ApplyHttpGetActionPortDecorator(Integer port) {
-        super(ANY, ANY); //We need to apply this to all deployments and all containers.
+        this(ANY, ANY, port);
+    }
+
+    public ApplyHttpGetActionPortDecorator(String deployment, String container, Integer port) {
+        super(deployment, container);
         this.port = port;
     }
 

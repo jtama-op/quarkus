@@ -22,6 +22,19 @@
         </dependencies>
     </dependencyManagement>
     <dependencies>
+
+        <!-- made test scope only to force Maven to build these dependencies before running the tests-->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-container-image-docker</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-container-image-jib</artifactId>
+            <scope>test</scope>
+        </dependency>
+
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-core-deployment</artifactId>
@@ -48,6 +61,34 @@
             </exclusions>
             <scope>test</scope>
         </dependency>
+
+        <!-- Minimal test dependencies to *-deployment artifacts for consistent build order -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-container-image-docker-deployment</artifactId>
+            <version>${project.version}</version>
+            <type>pom</type>
+            <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>*</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-container-image-jib-deployment</artifactId>
+            <version>${project.version}</version>
+            <type>pom</type>
+            <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>*</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
     </dependencies>
     <build>
         <testResources>
@@ -59,7 +100,6 @@
         <plugins>
             <plugin>
                 <artifactId>maven-invoker-plugin</artifactId>
-                <version>3.1.0</version>
                 <executions>
                     <execution>
                         <id>integration-tests</id>
@@ -84,7 +124,7 @@
                     <dependency>
                         <groupId>org.codehaus.groovy</groupId>
                         <artifactId>groovy</artifactId>
-                        <version>3.0.2</version>
+                        <version>3.0.8</version>
                     </dependency>
                 </dependencies>
             </plugin>

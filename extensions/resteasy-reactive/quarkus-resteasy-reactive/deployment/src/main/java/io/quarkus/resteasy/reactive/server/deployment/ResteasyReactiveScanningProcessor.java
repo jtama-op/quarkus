@@ -35,6 +35,7 @@ import org.jboss.resteasy.reactive.server.core.ExceptionMapping;
 import org.jboss.resteasy.reactive.server.model.ContextResolvers;
 import org.jboss.resteasy.reactive.server.model.ParamConverterProviders;
 import org.jboss.resteasy.reactive.server.processor.scanning.AsyncReturnTypeScanner;
+import org.jboss.resteasy.reactive.server.processor.scanning.CacheControlScanner;
 import org.jboss.resteasy.reactive.server.processor.scanning.ResteasyReactiveContextResolverScanner;
 import org.jboss.resteasy.reactive.server.processor.scanning.ResteasyReactiveExceptionMappingScanner;
 import org.jboss.resteasy.reactive.server.processor.scanning.ResteasyReactiveFeatureScanner;
@@ -70,6 +71,11 @@ public class ResteasyReactiveScanningProcessor {
     @BuildStep
     public MethodScannerBuildItem asyncSupport() {
         return new MethodScannerBuildItem(new AsyncReturnTypeScanner());
+    }
+
+    @BuildStep
+    public MethodScannerBuildItem cacheControlSupport() {
+        return new MethodScannerBuildItem(new CacheControlScanner());
     }
 
     @BuildStep
@@ -285,6 +291,30 @@ public class ResteasyReactiveScanningProcessor {
             if (preMatchingValue != null) {
                 builder.setPreMatching(preMatchingValue.asBoolean());
             }
+            AnnotationValue nonBlockingRequiredValue = instance.value("nonBlocking");
+            if (nonBlockingRequiredValue != null) {
+                builder.setNonBlockingRequired(nonBlockingRequiredValue.asBoolean());
+            }
+
+            List<AnnotationInstance> annotations = methodInfo.annotations();
+            Set<String> nameBindingNames = new HashSet<>();
+            for (AnnotationInstance annotation : annotations) {
+                if (SERVER_REQUEST_FILTER.equals(annotation.name())) {
+                    continue;
+                }
+                DotName annotationDotName = annotation.name();
+                ClassInfo annotationClassInfo = index.getClassByName(annotationDotName);
+                if (annotationClassInfo == null) {
+                    continue;
+                }
+                if ((annotationClassInfo.classAnnotation(ResteasyReactiveDotNames.NAME_BINDING) != null)) {
+                    nameBindingNames.add(annotationDotName.toString());
+                }
+            }
+            if (!nameBindingNames.isEmpty()) {
+                builder.setNameBindingNames(nameBindingNames);
+            }
+
             additionalContainerRequestFilters.produce(builder.build());
         }
         for (AnnotationInstance instance : index

@@ -28,8 +28,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 
 import io.quarkus.test.QuarkusUnitTest;
+import io.quarkus.vertx.web.Route.HttpMethod;
 import io.restassured.RestAssured;
-import io.vertx.core.http.HttpMethod;
 import io.vertx.ext.web.FileUpload;
 import io.vertx.ext.web.RoutingContext;
 
@@ -40,7 +40,8 @@ public class UploadsDirectoryTest {
             .setArchiveProducer(() -> ShrinkWrap.create(JavaArchive.class)
                     .addClasses(Routes.class)
                     .addAsResource(new StringAsset(
-                            "quarkus.http.body.uploads-directory = " + UPLOADS_DIR + "\n"),
+                            "quarkus.http.body.uploads-directory = " + UPLOADS_DIR
+                                    + "\nquarkus.http.body.delete-uploaded-files-on-end=false\n"),
                             "application.properties"));
 
     @Test

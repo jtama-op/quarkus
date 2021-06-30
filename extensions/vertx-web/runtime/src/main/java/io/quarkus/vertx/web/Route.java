@@ -8,7 +8,6 @@ import java.lang.annotation.Target;
 
 import io.quarkus.vertx.web.Route.Routes;
 import io.vertx.core.Handler;
-import io.vertx.core.http.HttpMethod;
 import io.vertx.ext.web.Router;
 import io.vertx.ext.web.RoutingContext;
 
@@ -67,7 +66,8 @@ import io.vertx.ext.web.RoutingContext;
  *  </code>
  * </pre>
  * 
- * If the annotated method returns {@code void} then it has to accept at least one argument.
+ * If the annotated method returns {@code void} then it has to accept at least one argument that makes it possible to end the
+ * response, for example {@link RoutingContext}.
  * If the annotated method does not return {@code void} then the arguments are optional.
  * <p>
  * If both {@link #path()} and {@link #regex()} are set the regular expression is used for matching.
@@ -81,6 +81,20 @@ import io.vertx.ext.web.RoutingContext;
 @Retention(RetentionPolicy.RUNTIME)
 @Target(ElementType.METHOD)
 public @interface Route {
+
+    /**
+     * Represents an HTTP method.
+     * This enumeration only provides the common HTTP method.
+     * For custom methods, you need to register the {@code route} manually on the managed {@code Router}.
+     */
+    enum HttpMethod {
+        GET,
+        HEAD,
+        POST,
+        PUT,
+        DELETE,
+        OPTIONS
+    }
 
     /**
      *

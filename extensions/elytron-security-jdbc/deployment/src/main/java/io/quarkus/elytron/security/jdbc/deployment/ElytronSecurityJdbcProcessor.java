@@ -6,14 +6,13 @@ import org.wildfly.security.auth.server.SecurityRealm;
 
 import io.quarkus.agroal.spi.JdbcDataSourceBuildItem;
 import io.quarkus.arc.deployment.BeanContainerBuildItem;
-import io.quarkus.deployment.Capability;
 import io.quarkus.deployment.Feature;
 import io.quarkus.deployment.annotations.BuildProducer;
 import io.quarkus.deployment.annotations.BuildStep;
 import io.quarkus.deployment.annotations.ExecutionTime;
 import io.quarkus.deployment.annotations.Record;
-import io.quarkus.deployment.builditem.CapabilityBuildItem;
 import io.quarkus.deployment.builditem.FeatureBuildItem;
+import io.quarkus.deployment.builditem.nativeimage.NativeImageSecurityProviderBuildItem;
 import io.quarkus.elytron.security.deployment.ElytronPasswordMarkerBuildItem;
 import io.quarkus.elytron.security.deployment.SecurityRealmBuildItem;
 import io.quarkus.elytron.security.jdbc.JdbcRecorder;
@@ -23,14 +22,16 @@ import io.quarkus.runtime.RuntimeValue;
 
 class ElytronSecurityJdbcProcessor {
 
-    @BuildStep
-    CapabilityBuildItem capability() {
-        return new CapabilityBuildItem(Capability.SECURITY_ELYTRON_JDBC);
-    }
+    private static final String PASSWORD_PROVIDER = "org.wildfly.security.password.WildFlyElytronPasswordProvider";
 
     @BuildStep()
     FeatureBuildItem feature() {
         return new FeatureBuildItem(Feature.SECURITY_JDBC);
+    }
+
+    @BuildStep
+    void addPasswordProviderToNativeImage(BuildProducer<NativeImageSecurityProviderBuildItem> additionalProviders) {
+        additionalProviders.produce(new NativeImageSecurityProviderBuildItem(PASSWORD_PROVIDER));
     }
 
     /**

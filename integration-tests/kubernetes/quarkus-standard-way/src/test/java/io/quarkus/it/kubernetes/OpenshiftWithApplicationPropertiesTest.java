@@ -73,21 +73,24 @@ public class OpenshiftWithApplicationPropertiesTest {
                 assertThat(s.getSpec()).satisfies(spec -> {
                     assertThat(spec.getSelector()).containsOnly(entry("app.kubernetes.io/name", "test-it"));
                     assertThat(spec.getPorts()).hasSize(1).singleElement().satisfies(p -> {
-                        assertThat(p.getPort()).isEqualTo(9090);
+                        assertThat(p.getPort()).isEqualTo(80);
+                        assertThat(p.getTargetPort().getIntVal()).isEqualTo(9090);
                     });
                 });
             });
         });
 
         assertThat(openshiftList).filteredOn(i -> "Route".equals(i.getKind())).singleElement().satisfies(i -> {
-            assertThat(i).isInstanceOfSatisfying(Route.class, in -> {
+            assertThat(i).isInstanceOfSatisfying(Route.class, r -> {
                 //Check that labels and annotations are also applied to Routes (#10260)
-                assertThat(i.getMetadata()).satisfies(m -> {
+                assertThat(r.getMetadata()).satisfies(m -> {
                     assertThat(m.getName()).isEqualTo("test-it");
                     assertThat(m.getLabels()).contains(entry("foo", "bar"));
                     assertThat(m.getAnnotations()).contains(entry("bar", "baz"));
                     assertThat(m.getNamespace()).isEqualTo("applications");
                 });
+
+                assertThat(r.getSpec().getPort().getTargetPort().getIntVal()).isEqualTo(9090);
             });
         });
     }

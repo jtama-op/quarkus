@@ -1,80 +1,140 @@
 package io.quarkus.arc.deployment.devconsole;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.HashSet;
+import java.util.Set;
+
+import org.jboss.jandex.AnnotationInstance;
+import org.jboss.jandex.AnnotationTarget;
+import org.jboss.jandex.AnnotationTarget.Kind;
+import org.jboss.jandex.ClassInfo;
+import org.jboss.jandex.FieldInfo;
+import org.jboss.jandex.MethodInfo;
+import org.jboss.jandex.Type;
+
+import io.quarkus.arc.deployment.CompletedApplicationClassPredicateBuildItem;
+import io.quarkus.arc.processor.BeanInfo;
+import io.quarkus.arc.processor.DotNames;
 
 public class DevBeanInfo implements Comparable<DevBeanInfo> {
 
-    private ClassName name;
-    private String methodName;
-    private DevBeanKind kind;
-    private ClassName type;
-    private List<ClassName> qualifiers = new ArrayList<>();
-    private ClassName scope;
+    public static DevBeanInfo from(BeanInfo bean, CompletedApplicationClassPredicateBuildItem predicate) {
+        Set<Name> qualifiers = new HashSet<>();
+        for (AnnotationInstance qualifier : bean.getQualifiers()) {
+            qualifiers.add(Name.from(qualifier));
+        }
+        Set<Name> types = new HashSet<>();
+        for (Type beanType : bean.getTypes()) {
+            types.add(Name.from(beanType));
+        }
+        Name scope = Name.from(bean.getScope().getDotName());
+        Name providerType = Name.from(bean.getProviderType());
 
-    public DevBeanInfo() {
+        if (bean.getTarget().isPresent()) {
+            AnnotationTarget target = bean.getTarget().get();
+            DevBeanKind kind;
+            String memberName;
+            boolean isApplicationBean;
+            Name declaringClass;
+            if (target.kind() == Kind.METHOD) {
+                MethodInfo method = target.asMethod();
+                memberName = method.name();
+                kind = DevBeanKind.METHOD;
+                isApplicationBean = predicate.test(bean.getDeclaringBean().getBeanClass());
+                declaringClass = Name.from(bean.getDeclaringBean().getBeanClass());
+            } else if (target.kind() == Kind.FIELD) {
+                FieldInfo field = target.asField();
+                memberName = field.name();
+                kind = DevBeanKind.FIELD;
+                isApplicationBean = predicate.test(bean.getDeclaringBean().getBeanClass());
+                declaringClass = Name.from(bean.getDeclaringBean().getBeanClass());
+            } else if (target.kind() == Kind.CLASS) {
+                ClassInfo clazz = target.asClass();
+                kind = DevBeanKind.CLASS;
+                memberName = null;
+                isApplicationBean = predicate.test(clazz.name());
+                declaringClass = null;
+            } else {
+                throw new IllegalArgumentException("Invalid annotation target: " + target);
+            }
+            return new DevBeanInfo(kind, isApplicationBean, providerType, memberName, types, qualifiers, scope, declaringClass);
+        } else {
+            // Synthetic bean
+            return new DevBeanInfo(DevBeanKind.SYNTHETIC, false, providerType, null, types, qualifiers, scope, null);
+        }
     }
 
-    public DevBeanInfo(ClassName name, String methodName, ClassName type, List<ClassName> qualifiers, ClassName scope,
-            DevBeanKind kind) {
-        this.name = name;
-        this.methodName = methodName;
-        this.type = type;
+    public DevBeanInfo(DevBeanKind kind, boolean isApplicationBean, Name providerType, String memberName, Set<Name> types,
+            Set<Name> qualifiers, Name scope, Name declaringClass) {
+        this.kind = kind;
+        this.isApplicationBean = isApplicationBean;
+        this.providerType = providerType;
+        this.memberName = memberName;
+        this.types = types;
         this.qualifiers = qualifiers;
         this.scope = scope;
-        this.kind = kind;
+        this.declaringClass = declaringClass;
     }
 
-    public void setKind(DevBeanKind kind) {
-        this.kind = kind;
-    }
+    private final DevBeanKind kind;
+    private final boolean isApplicationBean;
+    private final Name providerType;
+    private final String memberName;
+    private final Set<Name> types;
+    private final Set<Name> qualifiers;
+    private final Name scope;
+    private final Name declaringClass;
 
     public DevBeanKind getKind() {
         return kind;
     }
 
-    public void setScope(ClassName scope) {
-        this.scope = scope;
-    }
-
-    public ClassName getScope() {
+    public Name getScope() {
         return scope;
     }
 
-    public List<ClassName> getQualifiers() {
+    public Set<Name> getQualifiers() {
         return qualifiers;
     }
 
-    public void setQualifiers(List<ClassName> qualifiers) {
-        this.qualifiers = qualifiers;
+    public Set<Name> getNonDefaultQualifiers() {
+        Set<Name> nonDefault = new HashSet<>();
+        String atDefault = DotNames.DEFAULT.toString();
+        String atAny = DotNames.ANY.toString();
+        for (Name qualifier : qualifiers) {
+            if (qualifier.toString().endsWith(atDefault) || qualifier.toString().endsWith(atAny)) {
+                continue;
+            }
+            nonDefault.add(qualifier);
+        }
+        return nonDefault;
     }
 
-    public void setType(ClassName type) {
-        this.type = type;
+    public Set<Name> getTypes() {
+        return types;
     }
 
-    public ClassName getType() {
-        return type;
+    public Name getProviderType() {
+        return providerType;
     }
 
-    public String getMethodName() {
-        return methodName;
+    public String getMemberName() {
+        return memberName;
     }
 
-    public void setMethodName(String methodName) {
-        this.methodName = methodName;
+    public boolean isApplicationBean() {
+        return isApplicationBean;
     }
 
-    public void setName(ClassName name) {
-        this.name = name;
-    }
-
-    public ClassName getName() {
-        return name;
+    public Name getDeclaringClass() {
+        return declaringClass;
     }
 
     @Override
     public int compareTo(DevBeanInfo o) {
-        return type.getLocalName().compareTo(o.type.getLocalName());
+        // Application beans should go first
+        if (isApplicationBean == o.isApplicationBean) {
+            return providerType.compareTo(o.providerType);
+        }
+        return isApplicationBean ? -1 : 1;
     }
 }
