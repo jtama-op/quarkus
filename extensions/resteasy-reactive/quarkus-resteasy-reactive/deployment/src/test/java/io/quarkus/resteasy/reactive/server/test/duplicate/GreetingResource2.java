@@ -6,7 +6,7 @@ import javax.ws.rs.Path;
 @Path("")
 public class GreetingResource2 {
 
-    @Path("hello-resteasy/")
+    @Path("hello-resteasy")
     @GET
     public String helloGet() {
         return "Hello duplicate RESTEasy";

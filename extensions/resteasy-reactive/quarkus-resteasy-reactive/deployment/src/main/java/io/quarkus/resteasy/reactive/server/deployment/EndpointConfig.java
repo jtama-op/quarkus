@@ -2,7 +2,6 @@ package io.quarkus.resteasy.reactive.server.deployment;
 
 import java.util.Objects;
 import java.util.function.BiPredicate;
-import java.util.logging.Logger;
 
 public class EndpointConfig {
 

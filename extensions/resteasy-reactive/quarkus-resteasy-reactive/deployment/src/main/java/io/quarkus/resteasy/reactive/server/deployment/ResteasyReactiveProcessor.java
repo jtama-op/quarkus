@@ -26,9 +26,9 @@ import javax.ws.rs.core.MediaType;
 import javax.ws.rs.ext.MessageBodyReader;
 import javax.ws.rs.ext.MessageBodyWriter;
 
+import org.apache.commons.lang3.ArrayUtils;
 import org.eclipse.microprofile.config.Config;
 import org.eclipse.microprofile.config.ConfigProvider;
-import org.apache.commons.lang3.ArrayUtils;
 import org.jboss.jandex.AnnotationInstance;
 import org.jboss.jandex.AnnotationTarget;
 import org.jboss.jandex.AnnotationValue;
@@ -457,11 +457,7 @@ public class ResteasyReactiveProcessor {
                 }
             }
 
-            StringBuilder message = new StringBuilder();
-            allMethods.entrySet()
-                    .forEach(duplicate -> appendMessage(message, duplicate));
-            if (message.length() > 0)
-                log.warning(message.toString());
+            checkForDuplicateEndpoint(config, allMethods);
 
             //now index possible sub resources. These are all classes that have method annotations
             //that are not annotated @Path
@@ -613,6 +609,18 @@ public class ResteasyReactiveProcessor {
 
     }
 
+    private void checkForDuplicateEndpoint(ResteasyReactiveConfig config, Map<String, List<List<EndpointConfig>>> allMethods) {
+        String message = allMethods.entrySet().stream()
+                .map(this::getDuplicateEndpointMessage)
+                .collect(Collectors.joining());
+        if (message.length() > 0) {
+            if (config.failOnDuplicate) {
+                throw new ConfigurationError(message);
+            }
+            log.warning(message);
+        }
+    }
+
     private Map<String, List<EndpointConfig>> getResourceMethodByPath(String path,
             List<Tuple2<ClassInfo, ResourceMethod>> methods) {
 
@@ -625,13 +633,16 @@ public class ResteasyReactiveProcessor {
         return result;
     }
 
-    private void appendMessage(StringBuilder message, Map.Entry<String, List<List<EndpointConfig>>> duplicate) {
+    private String getDuplicateEndpointMessage(Map.Entry<String, List<List<EndpointConfig>>> duplicate) {
+        StringBuilder message = new StringBuilder();
         duplicate.getValue().stream()
                 .filter(values -> values.size() > 1)
                 .forEach(values -> message.append(duplicate.getKey())
-                        .append(" is declared by :\r\n")
-                        .append(values.stream().map(EndpointConfig::toCompleteString).collect(Collectors.joining("\r\n")))
+                        .append(" is declared by :").append(System.lineSeparator())
+                        .append(values.stream().map(EndpointConfig::toCompleteString)
+                                .collect(Collectors.joining(System.lineSeparator())))
                         .append(System.lineSeparator()));
+        return message.toString();
     }
 
     private List<EndpointConfig> getEndpointConfigs(List<Tuple2<ClassInfo, ResourceMethod>> methods) {
@@ -651,7 +662,8 @@ public class ResteasyReactiveProcessor {
             } else {
                 Stream<String> consumes = Arrays.stream(rm.getItem2().getConsumes());
                 consumes.forEach(
-                        consume -> Arrays.stream(rm.getItem2().getProduces()).forEach(produce -> result.add(new EndpointConfig(consume, produce, endpoint))));
+                        consume -> Arrays.stream(rm.getItem2().getProduces())
+                                .forEach(produce -> result.add(new EndpointConfig(consume, produce, endpoint))));
             }
         }
         return result;
