@@ -608,7 +608,7 @@ public class ResteasyReactiveProcessor {
     }
 
     private void addRessourceMethodByPath(Map<String, List<EndpointConfig>> allMethods, String path, ClassInfo info,
-            ResourceMethod rm) {
+                                          ResourceMethod rm) {
         allMethods.computeIfAbsent(getEndpointClassifier(rm, path), key -> new ArrayList<>())
                 .addAll(getEndpointConfigs(path, info, rm));
     }
