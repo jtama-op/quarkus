@@ -49,6 +49,7 @@ import org.apache.maven.plugin.BuildPluginManager;
 import org.apache.maven.plugin.MojoExecutionException;
 import org.apache.maven.plugin.MojoFailureException;
 import org.apache.maven.plugin.descriptor.MojoDescriptor;
+import org.apache.maven.plugin.descriptor.PluginDescriptor;
 import org.apache.maven.plugin.logging.Log;
 import org.apache.maven.plugins.annotations.Component;
 import org.apache.maven.plugins.annotations.LifecyclePhase;
@@ -73,6 +74,8 @@ import org.eclipse.aether.resolution.DependencyRequest;
 import org.eclipse.aether.resolution.DependencyResolutionException;
 import org.eclipse.aether.resolution.DependencyResult;
 import org.eclipse.aether.util.artifact.JavaScopes;
+import org.fusesource.jansi.internal.Kernel32;
+import org.fusesource.jansi.internal.WindowsSupport;
 
 import io.quarkus.bootstrap.devmode.DependenciesFilter;
 import io.quarkus.bootstrap.model.AppArtifactKey;
@@ -86,7 +89,6 @@ import io.quarkus.deployment.dev.QuarkusDevModeLauncher;
 import io.quarkus.maven.MavenDevModeLauncher.Builder;
 import io.quarkus.maven.components.MavenVersionEnforcer;
 import io.quarkus.maven.utilities.MojoUtils;
-import io.quarkus.utilities.OS;
 
 /**
  * The dev mojo, that runs a quarkus app in a forked process. A background compilation process is launched and any changes are
@@ -140,8 +142,6 @@ public class DevMojo extends AbstractMojo {
             "verify",
             "install",
             "deploy");
-    private static final String QUARKUS_PLUGIN_GROUPID = "io.quarkus";
-    private static final String QUARKUS_PLUGIN_ARTIFACTID = "quarkus-maven-plugin";
     private static final String QUARKUS_GENERATE_CODE_GOAL = "generate-code";
 
     private static final String ORG_APACHE_MAVEN_PLUGINS = "org.apache.maven.plugins";
@@ -311,11 +311,16 @@ public class DevMojo extends AbstractMojo {
     @Component
     private ToolchainManager toolchainManager;
 
+    private Map<AppArtifactKey, Plugin> pluginMap;
+
     /**
      * console attributes, used to restore the console state
      */
     private Attributes attributes;
+    private int windowsAttributes;
+    private boolean windowsAttributesSet;
     private Connection connection;
+    private boolean windowsColorSupport;
 
     @Override
     public void setLog(Log log) {
@@ -402,38 +407,53 @@ public class DevMojo extends AbstractMojo {
      * messes everything up. This attempts to fix that by saving the state so it can be restored
      */
     private void saveTerminalState() {
-        if (OS.determineOS() == OS.WINDOWS) {
-            //this does not work on windows
-            //jansi creates an input pump thread, that will steal
-            //input from the dev mode process
-            return;
-        }
         try {
-            new TerminalConnection(new Consumer<Connection>() {
-                @Override
-                public void accept(Connection connection) {
-                    attributes = connection.getAttributes();
-                    DevMojo.this.connection = connection;
+            windowsAttributes = WindowsSupport.getConsoleMode();
+            windowsAttributesSet = true;
+            if (windowsAttributes > 0) {
+                long hConsole = Kernel32.GetStdHandle(Kernel32.STD_INPUT_HANDLE);
+                if (hConsole != (long) Kernel32.INVALID_HANDLE_VALUE) {
+                    final int VIRTUAL_TERMINAL_PROCESSING = 0x0004; //enable color on the windows console
+                    if (Kernel32.SetConsoleMode(hConsole, windowsAttributes | VIRTUAL_TERMINAL_PROCESSING) != 0) {
+                        windowsColorSupport = true;
+                    }
                 }
-            });
-        } catch (IOException e) {
-            getLog().error(
-                    "Failed to setup console restore, console may be left in an inconsistent state if the process is killed",
-                    e);
+            }
+        } catch (Throwable t) {
+            try {
+                //this does not work on windows
+                //jansi creates an input pump thread, that will steal
+                //input from the dev mode process
+                new TerminalConnection(new Consumer<Connection>() {
+                    @Override
+                    public void accept(Connection connection) {
+                        attributes = connection.getAttributes();
+                        DevMojo.this.connection = connection;
+                    }
+                });
+            } catch (IOException e) {
+                getLog().error(
+                        "Failed to setup console restore, console may be left in an inconsistent state if the process is killed",
+                        e);
+            }
         }
     }
 
     private void restoreTerminalState() {
-        if (attributes == null || connection == null) {
-            return;
+        if (windowsAttributesSet) {
+            WindowsSupport.setConsoleMode(windowsAttributes);
+        } else {
+            if (attributes == null || connection == null) {
+                return;
+            }
+            connection.setAttributes(attributes);
+            int height = connection.size().getHeight();
+            connection.write(ANSI.MAIN_BUFFER);
+            connection.write(ANSI.CURSOR_SHOW);
+            connection.write("\u001B[0m");
+            connection.write("\033[" + height + ";0H");
+            connection.close();
         }
-        connection.setAttributes(attributes);
-        int height = connection.size().getHeight();
-        connection.write(ANSI.MAIN_BUFFER);
-        connection.write(ANSI.CURSOR_SHOW);
-        connection.write("\u001B[0m");
-        connection.write("\033[" + height + ";0H");
-        connection.close();
     }
 
     private void handleAutoCompile() throws MojoExecutionException {
@@ -480,7 +500,8 @@ public class DevMojo extends AbstractMojo {
     }
 
     private void triggerPrepare() throws MojoExecutionException {
-        executeIfConfigured(QUARKUS_PLUGIN_GROUPID, QUARKUS_PLUGIN_ARTIFACTID, QUARKUS_GENERATE_CODE_GOAL);
+        final PluginDescriptor pluginDescr = (PluginDescriptor) getPluginContext().get("pluginDescriptor");
+        executeIfConfigured(pluginDescr.getGroupId(), pluginDescr.getArtifactId(), QUARKUS_GENERATE_CODE_GOAL);
     }
 
     private void triggerCompile(boolean test) throws MojoExecutionException {
@@ -505,10 +526,12 @@ public class DevMojo extends AbstractMojo {
     }
 
     private void executeIfConfigured(String pluginGroupId, String pluginArtifactId, String goal) throws MojoExecutionException {
-        final Plugin plugin = project.getPlugin(pluginGroupId + ":" + pluginArtifactId);
+        final Plugin plugin = getConfiguredPluginOrNull(pluginGroupId, pluginArtifactId);
         if (plugin == null || plugin.getExecutions().stream().noneMatch(exec -> exec.getGoals().contains(goal))) {
             return;
         }
+        getLog().info("Invoking " + plugin.getGroupId() + ":" + plugin.getArtifactId() + ":" + plugin.getVersion() + ":" + goal
+                + " @ " + project.getArtifactId());
         executeMojo(
                 plugin(
                         groupId(pluginGroupId),
@@ -566,6 +589,17 @@ public class DevMojo extends AbstractMojo {
             throw new MojoExecutionException(
                     "Failed to obtain descriptor for Maven plugin " + plugin.getId() + " goal " + goal, e);
         }
+    }
+
+    private Plugin getConfiguredPluginOrNull(String groupId, String artifactId) {
+        if (pluginMap == null) {
+            pluginMap = new HashMap<>();
+            // the original plugin keys may include property expressions, so we can't rely on the exact groupId:artifactId keys
+            for (Plugin p : project.getBuildPlugins()) {
+                pluginMap.put(new AppArtifactKey(p.getGroupId(), p.getArtifactId()), p);
+            }
+        }
+        return pluginMap.get(new AppArtifactKey(groupId, artifactId));
     }
 
     private Map<Path, Long> readPomFileTimestamps(DevModeRunner runner) throws IOException {
@@ -772,6 +806,9 @@ public class DevMojo extends AbstractMojo {
                 .deleteDevJar(deleteDevJar);
 
         setJvmArgs(builder);
+        if (windowsColorSupport) {
+            builder.jvmArgs("-Dio.quarkus.force-color-support=true");
+        }
 
         builder.projectDir(project.getFile().getParentFile());
         builder.buildSystemProperties((Map) project.getProperties());
