@@ -49,7 +49,7 @@ public class ResteasyReactiveConfig {
     public boolean denyJaxRs;
 
     /**
-     * Wether or not duplicate endpoints should trigger error at startup
+     * Whether or not duplicate endpoints should trigger error at startup
      */
     @ConfigItem(defaultValue = "true")
     public boolean failOnDuplicate;

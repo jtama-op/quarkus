@@ -15,6 +15,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -26,7 +27,6 @@ import javax.ws.rs.core.MediaType;
 import javax.ws.rs.ext.MessageBodyReader;
 import javax.ws.rs.ext.MessageBodyWriter;
 
-import org.apache.commons.lang3.ArrayUtils;
 import org.eclipse.microprofile.config.Config;
 import org.eclipse.microprofile.config.ConfigProvider;
 import org.jboss.jandex.AnnotationInstance;
@@ -143,6 +143,8 @@ public class ResteasyReactiveProcessor {
     private static final String QUARKUS_INIT_CLASS = "io.quarkus.rest.runtime.__QuarkusInit";
 
     private static final Logger log = Logger.getLogger("io.quarkus.resteasy.reactive.server");
+
+    private static final Predicate<Object[]> isEmpty = array -> array == null || array.length == 0;
 
     @BuildStep
     public FeatureBuildItem buildSetup() {
@@ -650,13 +652,13 @@ public class ResteasyReactiveProcessor {
         List<EndpointConfig> result = new ArrayList<>();
         for (Tuple2<ClassInfo, ResourceMethod> rm : methods) {
             String endpoint = rm.getItem1().name().toString() + "#" + rm.getItem2().getName();
-            if (ArrayUtils.isEmpty(rm.getItem2().getConsumes()) && ArrayUtils.isEmpty(rm.getItem2().getProduces()))
+            if (isEmpty.test(rm.getItem2().getConsumes()) && isEmpty.test(rm.getItem2().getProduces()))
                 result.add(new EndpointConfig(null, null, endpoint));
-            else if (!ArrayUtils.isEmpty(rm.getItem2().getConsumes()) && ArrayUtils.isEmpty(rm.getItem2().getProduces())) {
+            else if (isEmpty.negate().test(rm.getItem2().getConsumes()) && isEmpty.test(rm.getItem2().getProduces())) {
                 result.addAll(Arrays.stream(rm.getItem2().getConsumes())
                         .map(consumes -> new EndpointConfig(consumes, null, endpoint))
                         .collect(Collectors.toList()));
-            } else if (ArrayUtils.isEmpty(rm.getItem2().getConsumes()) && !ArrayUtils.isEmpty(rm.getItem2().getProduces())) {
+            } else if (isEmpty.test(rm.getItem2().getConsumes()) && isEmpty.negate().test(rm.getItem2().getProduces())) {
                 result.addAll(Arrays.stream(rm.getItem2().getProduces())
                         .map(produces -> new EndpointConfig(null, produces, endpoint))
                         .collect(Collectors.toList()));
@@ -809,7 +811,4 @@ public class ResteasyReactiveProcessor {
         recorder.registerReader(serialisers, entityClass.getName(), reader);
     }
 
-    private String getKey(String path, ResourceMethod rm) {
-        return path + rm.getPath() + rm.getHttpMethod() + Arrays.toString(rm.getConsumes()) + Arrays.toString(rm.getProduces());
-    }
 }
