@@ -16,9 +16,12 @@ public class DuplicateResourceDetectionTest {
                     .addClasses(GreetingResource.class, GreetingResource2.class, GreetingResource3.class))
             .assertException(throwable -> Assertions.assertThat(throwable)
                     .hasMessage("GET /hello-resteasy is declared by :" + System.lineSeparator()
-                            +"io.quarkus.resteasy.reactive.server.test.duplicate.GreetingResource#helloGet consumes *, produces text/plain" + System.lineSeparator()
-                            + "io.quarkus.resteasy.reactive.server.test.duplicate.GreetingResource#helloGetNoExplicitMimeType consumes *, produces text/plain" + System.lineSeparator()
-                            + "io.quarkus.resteasy.reactive.server.test.duplicate.GreetingResource2#helloGet consumes *, produces text/plain" + System.lineSeparator()));
+                            + "io.quarkus.resteasy.reactive.server.test.duplicate.GreetingResource#helloGet consumes *, produces text/plain"
+                            + System.lineSeparator()
+                            + "io.quarkus.resteasy.reactive.server.test.duplicate.GreetingResource#helloGetNoExplicitMimeType consumes *, produces text/plain"
+                            + System.lineSeparator()
+                            + "io.quarkus.resteasy.reactive.server.test.duplicate.GreetingResource2#helloGet consumes *, produces text/plain"
+                            + System.lineSeparator()));
 
     @Test
     public void dummy() {
