@@ -23,10 +23,28 @@ public class GreetingResource {
     }
 
     @POST
-    @Produces(MediaType.TEXT_PLAIN)
-    @Consumes(MediaType.APPLICATION_JSON)
+    @Consumes(MediaType.TEXT_PLAIN)
+    @Produces(MediaType.APPLICATION_JSON)
     public String helloPost(String yo) {
         return "Hello RESTEasy";
     }
 
+    @GET
+    public String helloGetNoExplicitMimeType(String yo) {
+        return "Hello RESTEasy";
+    }
+
+    @POST
+    public Message helloPostNoExplicit(String yo) {
+        return new Message("Hello RESTEasy");
+    }
+
+    private class Message {
+        private String value;
+
+        public Message(String value) {
+            this.value = value;
+        }
+    }
 }
+

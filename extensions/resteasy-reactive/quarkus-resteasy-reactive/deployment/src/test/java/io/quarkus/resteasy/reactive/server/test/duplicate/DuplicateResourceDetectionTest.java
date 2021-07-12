@@ -15,11 +15,10 @@ public class DuplicateResourceDetectionTest {
             .setArchiveProducer(() -> ShrinkWrap.create(JavaArchive.class)
                     .addClasses(GreetingResource.class, GreetingResource2.class, GreetingResource3.class))
             .assertException(throwable -> Assertions.assertThat(throwable)
-                    .hasMessageContaining("GET /hello-resteasy is declared by :")
-                    .hasMessageContaining(
-                            "io.quarkus.resteasy.reactive.server.test.duplicate.GreetingResource#helloGet consumes *, produces text/plain")
-                    .hasMessageContaining(
-                            "io.quarkus.resteasy.reactive.server.test.duplicate.GreetingResource2#helloGet consumes *, produces text/plain"));
+                    .hasMessage("GET /hello-resteasy is declared by :" + System.lineSeparator()
+                            +"io.quarkus.resteasy.reactive.server.test.duplicate.GreetingResource#helloGet consumes *, produces text/plain" + System.lineSeparator()
+                            + "io.quarkus.resteasy.reactive.server.test.duplicate.GreetingResource#helloGetNoExplicitMimeType consumes *, produces text/plain" + System.lineSeparator()
+                            + "io.quarkus.resteasy.reactive.server.test.duplicate.GreetingResource2#helloGet consumes *, produces text/plain" + System.lineSeparator()));
 
     @Test
     public void dummy() {

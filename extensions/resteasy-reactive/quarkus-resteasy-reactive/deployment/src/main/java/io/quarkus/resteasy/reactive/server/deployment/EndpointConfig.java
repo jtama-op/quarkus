@@ -1,21 +1,21 @@
 package io.quarkus.resteasy.reactive.server.deployment;
 
 import java.util.Objects;
-import java.util.function.BiPredicate;
 
 public class EndpointConfig {
 
-    private String consumes;
-    private String produces;
-    private String endpoint;
+    private final String path;
+    private final String verb;
+    private final String consumes;
+    private final String produces;
+    private final String exposingMethod;
 
-    private static final BiPredicate<String, String> isEquivalentMimeType = (item1, item2) -> item1.equals("*")
-            || item2.equals("*") || item1.equals(item2);
-
-    public EndpointConfig(String consumes, String produces, String endpoint) {
+    public EndpointConfig(String path, String verb, String consumes, String produces, String exposingMethod) {
+        this.path = path;
+        this.verb = verb;
         this.consumes = consumes != null ? consumes : "*";
         this.produces = produces != null ? produces : "*";
-        this.endpoint = endpoint;
+        this.exposingMethod = exposingMethod;
     }
 
     @Override
@@ -24,23 +24,26 @@ public class EndpointConfig {
     }
 
     public String toCompleteString() {
-        return String.format("%s consumes %s, produces %s", endpoint, consumes, produces);
+        return String.format("%s consumes %s, produces %s", exposingMethod, consumes, produces);
     }
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) {
+        if (this == o)
             return true;
-        }
-        if (o == null || getClass() != o.getClass()) {
+        if (o == null || getClass() != o.getClass())
             return false;
-        }
         EndpointConfig that = (EndpointConfig) o;
-        return consumes.equals(that.consumes) && produces.equals(that.produces);
+        return Objects.equals(path, that.path) && Objects.equals(verb, that.verb) && Objects.equals(consumes, that.consumes)
+                && Objects.equals(produces, that.produces) && Objects.equals(exposingMethod, that.exposingMethod);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(consumes, produces);
+        return Objects.hash(path, verb, consumes, produces, exposingMethod);
+    }
+
+    public String getExposedEndpoint() {
+        return String.format("%s %s", verb, path);
     }
 }

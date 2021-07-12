@@ -4,13 +4,13 @@ import static java.util.stream.Collectors.toList;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
@@ -132,7 +132,6 @@ import io.quarkus.vertx.http.deployment.RouteBuildItem;
 import io.quarkus.vertx.http.runtime.HttpBuildTimeConfig;
 import io.quarkus.vertx.http.runtime.HttpConfiguration;
 import io.quarkus.vertx.http.runtime.VertxHttpRecorder;
-import io.smallrye.mutiny.tuples.Tuple2;
 import io.vertx.core.Handler;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.file.AsyncFile;
@@ -424,39 +423,22 @@ public class ResteasyReactiveProcessor {
                         .setDefaultProducesHandler(new DefaultProducesHandler.DelegatingDefaultProducesHandler(handlers));
             }
             serverEndpointIndexer = serverEndpointIndexerBuilder.build();
-            Map<String, List<List<EndpointConfig>>> allMethods = new HashMap<>();
+
+            Map<String, List<EndpointConfig>> allMethods = new HashMap<>();
 
             for (ClassInfo i : scannedResources.values()) {
                 if (!appResult.keepClass(i.name().toString())) {
                     continue;
                 }
                 ResourceClass endpoints = serverEndpointIndexer.createEndpoints(i);
-                List<ResourceMethod> resourceMethods = endpoints.getMethods();
-                getResourceMethodByPath(endpoints.getPath(),
-                        resourceMethods.stream().map(item -> Tuple2.of(i, item)).collect(Collectors.toList()))
-                                .forEach((path, endpointConfs) -> {
-                                    for (EndpointConfig endpointConfig : endpointConfs) {
-                                        boolean found = false;
-                                        for (List<EndpointConfig> subList : allMethods.computeIfAbsent(path,
-                                                k -> new ArrayList<>())) {
-                                            if (subList.stream()
-                                                    .anyMatch(endpointConfig1 -> endpointConfig1.equals(endpointConfig))) {
-                                                subList.add(endpointConfig);
-                                                found = true;
-                                            }
-                                        }
-                                        if (!found) {
-                                            List<EndpointConfig> toAdd = new ArrayList<>();
-                                            toAdd.add(endpointConfig);
-                                            allMethods.get(path).add(toAdd);
-                                        }
-                                    }
-                                });
                 if (singletonClasses.contains(i.name().toString())) {
                     endpoints.setFactory(new SingletonBeanFactory<>(i.name().toString()));
                 }
                 if (endpoints != null) {
                     resourceClasses.add(endpoints);
+                    for (ResourceMethod rm : endpoints.getMethods()) {
+                        addRessourceMethodByPath(allMethods, endpoints.getPath(), i, rm);
+                    }
                 }
             }
 
@@ -612,9 +594,10 @@ public class ResteasyReactiveProcessor {
 
     }
 
-    private void checkForDuplicateEndpoint(ResteasyReactiveConfig config, Map<String, List<List<EndpointConfig>>> allMethods) {
-        String message = allMethods.entrySet().stream()
+    private void checkForDuplicateEndpoint(ResteasyReactiveConfig config, Map<String, List<EndpointConfig>> allMethods) {
+        String message = allMethods.values().stream()
                 .map(this::getDuplicateEndpointMessage)
+                .filter(Objects::nonNull)
                 .collect(Collectors.joining());
         if (message.length() > 0) {
             if (config.failOnDuplicate) {
@@ -624,49 +607,57 @@ public class ResteasyReactiveProcessor {
         }
     }
 
-    private Map<String, List<EndpointConfig>> getResourceMethodByPath(String path,
-            List<Tuple2<ClassInfo, ResourceMethod>> methods) {
-
-        Map<String, List<Tuple2<ClassInfo, ResourceMethod>>> collect = methods.stream()
-                .collect(Collectors.groupingBy(item -> item.getItem2().getHttpMethod() + " " + (path.equals("/") ? "" : path)
-                        + item.getItem2().getPath()));
-
-        Map<String, List<EndpointConfig>> result = new HashMap<>();
-        collect.keySet().forEach(key -> result.put(key, getEndpointConfigs(collect.get(key))));
-        return result;
+    private void addRessourceMethodByPath(Map<String, List<EndpointConfig>> allMethods, String path, ClassInfo info,
+            ResourceMethod rm) {
+        allMethods.computeIfAbsent(getEndpointClassifier(rm, path), key -> new ArrayList<>())
+                .addAll(getEndpointConfigs(path, info, rm));
     }
 
-    private String getDuplicateEndpointMessage(Map.Entry<String, List<List<EndpointConfig>>> duplicate) {
+    private String getEndpointClassifier(ResourceMethod resourceMethod, String path) {
+        return resourceMethod.getHttpMethod() + " " + (path.equals("/") ? "" : path)
+                + resourceMethod.getPath();
+    }
+
+    private String getDuplicateEndpointMessage(List<EndpointConfig> endpoints) {
         StringBuilder message = new StringBuilder();
-        duplicate.getValue().stream()
-                .filter(values -> values.size() > 1)
-                .forEach(values -> message.append(duplicate.getKey())
-                        .append(" is declared by :").append(System.lineSeparator())
-                        .append(values.stream().map(EndpointConfig::toCompleteString)
-                                .collect(Collectors.joining(System.lineSeparator())))
-                        .append(System.lineSeparator()));
+        if (endpoints.size() < 2) {
+            return null;
+        }
+        Map<String, List<EndpointConfig>> duplicatesByMimeTypes = endpoints.stream()
+                .collect(Collectors.groupingBy(EndpointConfig::toString));
+        for (Map.Entry<String, List<EndpointConfig>> duplicates : duplicatesByMimeTypes.entrySet()) {
+            if (duplicates.getValue().size() < 2) {
+                continue;
+            }
+            message.append(endpoints.get(0).getExposedEndpoint())
+                    .append(" is declared by :")
+                    .append(System.lineSeparator());
+            for (EndpointConfig config : duplicates.getValue()) {
+                message.append(config.toCompleteString())
+                        .append(System.lineSeparator());
+            }
+        }
         return message.toString();
     }
 
-    private List<EndpointConfig> getEndpointConfigs(List<Tuple2<ClassInfo, ResourceMethod>> methods) {
+    private List<EndpointConfig> getEndpointConfigs(String path, ClassInfo info, ResourceMethod rm) {
         List<EndpointConfig> result = new ArrayList<>();
-        for (Tuple2<ClassInfo, ResourceMethod> rm : methods) {
-            String endpoint = rm.getItem1().name().toString() + "#" + rm.getItem2().getName();
-            if (isEmpty.test(rm.getItem2().getConsumes()) && isEmpty.test(rm.getItem2().getProduces()))
-                result.add(new EndpointConfig(null, null, endpoint));
-            else if (isEmpty.negate().test(rm.getItem2().getConsumes()) && isEmpty.test(rm.getItem2().getProduces())) {
-                result.addAll(Arrays.stream(rm.getItem2().getConsumes())
-                        .map(consumes -> new EndpointConfig(consumes, null, endpoint))
-                        .collect(Collectors.toList()));
-            } else if (isEmpty.test(rm.getItem2().getConsumes()) && isEmpty.negate().test(rm.getItem2().getProduces())) {
-                result.addAll(Arrays.stream(rm.getItem2().getProduces())
-                        .map(produces -> new EndpointConfig(null, produces, endpoint))
-                        .collect(Collectors.toList()));
-            } else {
-                Stream<String> consumes = Arrays.stream(rm.getItem2().getConsumes());
-                consumes.forEach(
-                        consume -> Arrays.stream(rm.getItem2().getProduces())
-                                .forEach(produce -> result.add(new EndpointConfig(consume, produce, endpoint))));
+        String exposingMethod = info.name().toString() + "#" + rm.getName();
+        if (isEmpty.test(rm.getConsumes()) && isEmpty.test(rm.getProduces()))
+            result.add(new EndpointConfig(path, rm.getHttpMethod(), null, null, exposingMethod));
+        else if (isEmpty.negate().test(rm.getConsumes()) && isEmpty.test(rm.getProduces())) {
+            for (String consume : rm.getConsumes()) {
+                result.add(new EndpointConfig(path, rm.getHttpMethod(), consume, null, exposingMethod));
+            }
+        } else if (isEmpty.test(rm.getConsumes()) && isEmpty.negate().test(rm.getProduces())) {
+            for (String produce : rm.getProduces()) {
+                result.add(new EndpointConfig(path, rm.getHttpMethod(), null, produce, exposingMethod));
+            }
+        } else {
+            for (String consume : rm.getConsumes()) {
+                for (String produce : rm.getProduces()) {
+                    result.add(new EndpointConfig(path, rm.getHttpMethod(), consume, produce, exposingMethod));
+                }
             }
         }
         return result;
