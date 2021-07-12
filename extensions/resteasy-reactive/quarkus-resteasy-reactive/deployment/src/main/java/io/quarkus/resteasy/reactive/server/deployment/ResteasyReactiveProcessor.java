@@ -642,7 +642,6 @@ public class ResteasyReactiveProcessor {
 
     private List<EndpointConfig> getEndpointConfigs(String path, ClassInfo info, ResourceMethod rm) {
         List<EndpointConfig> result = new ArrayList<>();
-<<<<<<< HEAD
         String exposingMethod = info.name().toString() + "#" + rm.getName();
         if (isEmpty.test(rm.getConsumes()) && isEmpty.test(rm.getProduces()))
             result.add(new EndpointConfig(path, rm.getHttpMethod(), null, null, exposingMethod));
@@ -659,27 +658,6 @@ public class ResteasyReactiveProcessor {
                 for (String produce : rm.getProduces()) {
                     result.add(new EndpointConfig(path, rm.getHttpMethod(), consume, produce, exposingMethod));
                 }
-=======
-        for (Tuple2<ClassInfo, ResourceMethod> rm : methods) {
-            String endpoint = rm.getItem1().name().toString() + "#" + rm.getItem2().getName();
-            if (isEmpty.test(rm.getItem2().getConsumes()) && isEmpty.test(rm.getItem2().getProduces()))
-                result.add(new EndpointConfig(null, null, endpoint));
-            else if (isEmpty.negate().test(rm.getItem2().getConsumes()) && isEmpty.test(rm.getItem2().getProduces())) {
-                result.addAll(Arrays.stream(rm.getItem2().getConsumes())
-                        .map(consumes -> new EndpointConfig(consumes, null, endpoint))
-                        .collect(Collectors.toList()));
-            } else if (isEmpty.test(rm.getItem2().getConsumes()) && isEmpty.negate().test(rm.getItem2().getProduces())) {
-                result.addAll(Arrays.stream(rm.getItem2().getProduces())
-                        .map(produces -> new EndpointConfig(null, produces, endpoint))
-                        .collect(Collectors.toList()));
-            } else {
-                Stream<String> consumes = Arrays.stream(rm.getItem2().getConsumes());
-                consumes.forEach(
-                        consume -> Arrays.stream(rm.getItem2().getProduces())
-                                .forEach(produce -> result.add(new EndpointConfig(consume, produce, endpoint))));
->>>>>>> c618f185e8... Remove usage of ArrayUtils
-            }
-        }
         return result;
     }
 
