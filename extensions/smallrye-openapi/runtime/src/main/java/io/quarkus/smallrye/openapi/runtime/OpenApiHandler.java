@@ -37,12 +37,6 @@ public class OpenApiHandler implements Handler<RoutingContext> {
         this.corsEnabled = corsEnabled;
     }
 
-    final boolean corsEnabled;
-
-    public OpenApiHandler(boolean corsEnabled) {
-        this.corsEnabled = corsEnabled;
-    }
-
     @Override
     public void handle(RoutingContext event) {
         HttpServerRequest req = event.request();
